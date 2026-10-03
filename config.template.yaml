@@ -1,0 +1,32 @@
+# Creator slug from https://www.patreon.com/c/<creator>/posts
+creator: MandyCaneLane
+# Display name used in folder names; defaults to the name on Patreon.
+# creator_name: Mandy Cane Lane
+
+# Paths inside the container
+library_dir: /library
+cookies_file: /config/cookies.txt  # Netscape cookies.txt exported from a logged-in browser
+data_dir: /data                    # state.json and temporary files
+
+# Only download posts published on or after this date (omit for the whole archive).
+since: 2026-01-01
+# Cap per run, so a large backlog is spread over several runs (0 = no cap).
+max_downloads_per_run: 10
+interval_minutes: 60
+
+# Folder name per source show, and for posts without "SxE" in the title.
+show_name_template: "{creator} - {show}"
+misc_show_name: "{creator}"
+
+# Map alternative spellings to one show name (matching ignores case, spacing and &/and).
+show_aliases: {}
+#   "Fools and Horses": "Only Fools And Horses"
+
+# Uptime Kuma push URL; called with status=up/down after every run.
+# heartbeat_url: https://uptime.example.com/api/push/XXXXXXXX
+
+# Trigger a library scan after new downloads.
+# plex:
+#   url: http://10.11.12.16:32400
+#   token: XXXXXXXX
+#   section_id: 12

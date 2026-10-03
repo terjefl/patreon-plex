@@ -1,0 +1,11 @@
+services:
+  patreon-plex:
+    image: ghcr.io/terjefl/patreon-plex:latest
+    container_name: patreon-plex
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Oslo
+    volumes:
+      - ./config:/config:ro    # config.yaml + cookies.txt
+      - ./data:/data
+      - /path/to/media/Patreon:/library
