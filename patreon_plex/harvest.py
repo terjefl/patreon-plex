@@ -13,7 +13,7 @@ from yt_dlp.networking import Request
 from yt_dlp.networking.exceptions import HTTPError
 from yt_dlp.utils import DownloadError
 
-from .config import Config
+from .config import Config, CreatorConfig
 from .library import Episode, write_episode_nfo, write_show_nfo
 from .state import State
 from .titles import clean, parse_title, safe_filename, show_key
@@ -39,17 +39,20 @@ class RunResult:
 
 
 class Harvester:
-    def __init__(self, cfg: Config, dry_run: bool = False):
+    def __init__(self, cfg: Config, creator: CreatorConfig, dry_run: bool = False):
         self.cfg = cfg
-        self.cfg.data_dir.mkdir(parents=True, exist_ok=True)
-        self.tmp_dir = cfg.data_dir / "tmp"
+        self.creator = creator
+        work_dir = cfg.data_dir / creator.creator
+        work_dir.mkdir(parents=True, exist_ok=True)
+        self.tmp_dir = work_dir / "tmp"
+        self.library_dir = cfg.library_dir / safe_filename(creator.folder_name)
         # yt-dlp writes refreshed cookies back to the cookie file, so work on a copy
         # and leave the (possibly read-only) mounted original alone.
-        self.cookies = cfg.data_dir / "cookies.txt"
-        self.state = State(cfg.data_dir / "state.json")
+        self.cookies = work_dir / "cookies.txt"
+        self.state = State(work_dir / "state.json")
         if dry_run:
             self.state.save = lambda: None
-        self.creator_name = cfg.creator_name or cfg.creator
+        self.creator_name = creator.creator_name or creator.creator
         self.creator_avatar: str | None = None
 
     def _params(self, **extra) -> dict:
@@ -81,7 +84,7 @@ class Harvester:
     # ---- planning ----------------------------------------------------------
 
     def _canonical_show(self, raw: str) -> str:
-        aliases = {show_key(k): v for k, v in self.cfg.show_aliases.items()}
+        aliases = {show_key(k): v for k, v in self.creator.show_aliases.items()}
         key = show_key(raw)
         if key in aliases:
             return aliases[key]
@@ -116,9 +119,9 @@ class Harvester:
             season, episode, ep_title = published.year, numbered(f"misc:{published.year}"), title
 
         if show:
-            folder = self.cfg.show_name_template.format(creator=self.creator_name, show=show)
+            folder = self.creator.show_name_template.format(creator=self.creator_name, show=show)
         else:
-            folder = self.cfg.misc_show_name.format(creator=self.creator_name)
+            folder = self.creator.misc_show_name.format(creator=self.creator_name)
         return Episode(
             post_id=post_id,
             show_folder=safe_filename(folder),
@@ -135,7 +138,7 @@ class Harvester:
         if " - " not in title:
             return None
         key = show_key(title.split(" - ", 1)[0])
-        aliases = {show_key(k): v for k, v in self.cfg.show_aliases.items()}
+        aliases = {show_key(k): v for k, v in self.creator.show_aliases.items()}
         return aliases.get(key) or self.state.shows.get(key)
 
     # ---- listing -----------------------------------------------------------
@@ -145,8 +148,10 @@ class Harvester:
         candidates: list[dict] = []
         known_streak = old_streak = 0
         with YoutubeDL(self._params(extract_flat="in_playlist")) as ydl:
-            playlist = ydl.extract_info(self.cfg.campaign_url, download=False, process=False)
-            self.creator_name = self.cfg.creator_name or playlist.get("uploader") or playlist.get("title") or self.cfg.creator
+            playlist = ydl.extract_info(self.creator.campaign_url, download=False, process=False)
+            self.creator_name = (
+                self.creator.creator_name or playlist.get("uploader") or playlist.get("title") or self.creator.creator
+            )
             self.creator_avatar = playlist.get("thumbnail")
             for entry in playlist["entries"]:
                 post_id = _post_id(entry)
@@ -162,7 +167,7 @@ class Harvester:
                     self._record_error(post_id, str(e))
                     continue
                 published = datetime.fromtimestamp(info["timestamp"], tz=UTC).date()
-                if self.cfg.since and published < self.cfg.since:
+                if self.creator.since and published < self.creator.since:
                     old_streak += 1
                     if old_streak >= STOP_AFTER_OLD:
                         break
@@ -193,7 +198,7 @@ class Harvester:
 
     def download(self, info: dict) -> list[Path]:
         ep = self.plan(info)
-        show_dir = self.cfg.library_dir / ep.show_folder
+        show_dir = self.library_dir / ep.show_folder
         season_dir = show_dir / ep.season_dir
         season_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_show_assets(show_dir, ep)
@@ -254,11 +259,11 @@ class Harvester:
         log.info("Logged in to Patreon as %s", user)
         result = RunResult()
         candidates = self.collect()
-        max_dl = self.cfg.max_downloads_per_run
+        max_dl = self.creator.max_downloads_per_run
         if max_dl and len(candidates) > max_dl:
             result.pending = len(candidates) - max_dl
             candidates = candidates[:max_dl]
-        log.info("%d new post(s) to download", len(candidates))
+        log.info("%s: %d new post(s) to download", self.creator_name, len(candidates))
         for info in candidates:
             post_id = str(info["id"])
             log.info("Downloading %s: %s", post_id, info.get("title"))
@@ -275,21 +280,8 @@ class Harvester:
             result.downloaded.append(post_id)
             log.info("Saved %s", ", ".join(f.name for f in files))
         self.state.save()
-        if result.downloaded:
-            self.refresh_plex()
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
         return result
-
-    def refresh_plex(self) -> None:
-        plex = self.cfg.plex
-        if not plex:
-            return
-        url = f"{plex.url.rstrip('/')}/library/sections/{plex.section_id}/refresh?X-Plex-Token={plex.token}"
-        try:
-            urllib.request.urlopen(url, timeout=30).read()
-            log.info("Triggered Plex library scan")
-        except Exception as e:
-            log.warning("Plex refresh failed: %s", e)
 
 
 def _post_id(entry: dict) -> str:
@@ -300,6 +292,18 @@ def _post_id(entry: dict) -> str:
     if not match:
         raise ValueError(f"Cannot find post id in {entry['url']}")
     return match.group(1)
+
+
+def refresh_plex(cfg: Config) -> None:
+    plex = cfg.plex
+    if not plex:
+        return
+    url = f"{plex.url.rstrip('/')}/library/sections/{plex.section_id}/refresh?X-Plex-Token={plex.token}"
+    try:
+        urllib.request.urlopen(url, timeout=30).read()
+        log.info("Triggered Plex library scan")
+    except Exception as e:
+        log.warning("Plex refresh failed: %s", e)
 
 
 def heartbeat(url: str | None, ok: bool, msg: str) -> None:

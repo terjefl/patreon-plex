@@ -1,26 +1,9 @@
-# Creator slug from https://www.patreon.com/c/<creator>/posts
-creator: MandyCaneLane
-# Display name used in folder names; defaults to the name on Patreon.
-# creator_name: Mandy Cane Lane
-
 # Paths inside the container
-library_dir: /library
+library_dir: /library              # each creator gets a subfolder here
 cookies_file: /config/cookies.txt  # Netscape cookies.txt exported from a logged-in browser
-data_dir: /data                    # state.json and temporary files
+data_dir: /data                    # per-creator state.json and temporary files
 
-# Only download posts published on or after this date (omit for the whole archive).
-since: 2026-01-01
-# Cap per run, so a large backlog is spread over several runs (0 = no cap).
-max_downloads_per_run: 10
 interval_minutes: 60
-
-# Folder name per source show, and for posts without "SxE" in the title.
-show_name_template: "{creator} - {show}"
-misc_show_name: "{creator}"
-
-# Map alternative spellings to one show name (matching ignores case, spacing and &/and).
-show_aliases: {}
-#   "Fools and Horses": "Only Fools And Horses"
 
 # Uptime Kuma push URL; called with status=up/down after every run.
 # heartbeat_url: https://uptime.example.com/api/push/XXXXXXXX
@@ -30,3 +13,21 @@ show_aliases: {}
 #   url: http://10.11.12.16:32400
 #   token: XXXXXXXX
 #   section_id: 12
+
+creators:
+  # Slug from https://www.patreon.com/c/<creator>/posts
+  - creator: MandyCaneLane
+    # Used in folder names; defaults to the slug.
+    creator_name: Mandy Cane Lane
+    # Subfolder of library_dir; defaults to creator_name.
+    # folder: Mandy Cane Lane
+    # Only download posts published on or after this date (omit for the whole archive).
+    since: 2026-09-01
+    # Cap per run, so a large backlog is spread over several runs (0 = no cap).
+    max_downloads_per_run: 10
+    # Folder name per source show, and for posts without "SxE" in the title.
+    show_name_template: "{creator} - {show}"
+    misc_show_name: "{creator}"
+    # Map alternative spellings to one show name (matching ignores case, spacing and &/and).
+    show_aliases: {}
+    #   "Fools and Horses": "Only Fools And Horses"
