@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import re
@@ -8,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from PIL import Image
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
 from yt_dlp.networking.exceptions import HTTPError
@@ -212,6 +214,10 @@ class Harvester:
         show_dir = self.library_dir / ep.show_folder
         season_dir = show_dir / ep.season_dir
         season_dir.mkdir(parents=True, exist_ok=True)
+        # Plex scans the moment the video lands, and its NFO agent identifies the show by the
+        # metadata it finds then. So every sidecar must exist before the video does.
+        preview = self._fetch_thumbnail(info)
+        self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, preview)
 
         entries = list(info["entries"]) if info.get("_type") == "playlist" else [info]
         files: list[Path] = []
@@ -219,6 +225,8 @@ class Harvester:
             basename = ep.basename(part=i if len(entries) > 1 else None)
             if (season_dir / f"{basename}.mp4").exists():
                 basename += f" ({ep.post_id})"
+            nfo = season_dir / f"{basename}.nfo"
+            write_episode_nfo(nfo, ep)
             entry.update(
                 title=ep.display_title,
                 description=ep.description,
@@ -243,10 +251,28 @@ class Harvester:
             with YoutubeDL(params) as ydl:
                 result = ydl.process_ie_result(entry, download=True)
             path = Path(result["requested_downloads"][0]["filepath"])
-            write_episode_nfo(path.with_suffix(".nfo"), ep)
+            if path.with_suffix(".nfo") != nfo:
+                nfo.replace(path.with_suffix(".nfo"))
             files.append(path)
-        self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, files[0].with_suffix(".jpg"))
+        if preview:
+            preview.unlink(missing_ok=True)
         return files
+
+    def _fetch_thumbnail(self, info: dict) -> Path | None:
+        """The post's thumbnail as a local JPEG, for show artwork made before the download."""
+        url = info.get("thumbnail")
+        if not url:
+            return None
+        try:
+            self.tmp_dir.mkdir(parents=True, exist_ok=True)
+            out = self.tmp_dir / f"preview-{info['id']}.jpg"
+            with YoutubeDL(self._params()) as ydl:
+                data = ydl.urlopen(url).read()
+            Image.open(io.BytesIO(data)).convert("RGB").save(out, "JPEG", quality=92)
+            return out
+        except Exception as e:
+            log.warning("Could not fetch thumbnail for %s: %s", info.get("id"), e)
+            return None
 
     def _ensure_show_assets(
         self, show_dir: Path, title: str, source_show: str | None, thumb: Path | None, force: bool = False
