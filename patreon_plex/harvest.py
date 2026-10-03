@@ -22,7 +22,7 @@ from .titles import clean, parse_title, safe_filename, show_key
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
-# Stop paging through the (newest-first) post list after this many already handled posts in a row.
+# Without `since`: stop paging the (newest-first) post list after this many handled posts in a row.
 STOP_AFTER_KNOWN = 25
 # ...or this many posts in a row older than `since`.
 STOP_AFTER_OLD = 5
@@ -160,7 +160,9 @@ class Harvester:
                 post_id = _post_id(entry)
                 if limit is None and self.state.is_settled(post_id, MAX_ATTEMPTS):
                     known_streak += 1
-                    if known_streak >= STOP_AFTER_KNOWN:
+                    # With `since`, keep paging until posts get too old: the date may have been
+                    # moved back, leaving unhandled posts behind a long run of handled ones.
+                    if not self.creator.since and known_streak >= STOP_AFTER_KNOWN:
                         break
                     continue
                 known_streak = 0
