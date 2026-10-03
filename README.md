@@ -41,7 +41,7 @@ Commands (`docker exec patreon-plex patreon-plex --config /config/config.yaml <c
 
 ## Plex
 
-Create a **TV Shows** library and add each creator's folder (for example `Patreon/Mandy Cane Lane`) as a folder in it. Plex expects the show folders directly under each library folder. Choose the **Personal Media Shows** agent, so Plex doesn't try to match the folders against real TV shows. Turn on *Local Media Assets* so posters and episode thumbnails are used.
+Create a **TV Shows** library and add each creator's folder (for example `Patreon/Mandy Cane Lane`) as a folder in it. Plex expects the show folders directly under each library folder. Choose the **Plex NFO Series** agent with the **Plex TV Series** scanner. It reads the `.nfo` sidecars, so titles, descriptions, dates, posters and episode thumbnails all show up, and Plex doesn't try to match the folders against real TV shows.
 
 ## Monitoring
 

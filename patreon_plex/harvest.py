@@ -176,6 +176,12 @@ class Harvester:
                 candidates.append(info)
                 if limit and len(candidates) >= limit:
                     break
+        # Register every show seen in this batch up front, so "Show - Special" posted
+        # before the show's first SxE episode still lands in that show's Season 00.
+        for info in candidates:
+            parsed = parse_title(clean(info.get("title") or ""))
+            if parsed:
+                self._canonical_show(parsed.show)
         return list(reversed(candidates))
 
     def _record_error(self, post_id: str, message: str) -> None:
@@ -210,7 +216,7 @@ class Harvester:
             if (season_dir / f"{basename}.mp4").exists():
                 basename += f" ({ep.post_id})"
             entry.update(
-                title=ep.title or basename,
+                title=ep.display_title,
                 description=ep.description,
                 show=ep.show_folder,
                 series=ep.show_folder,

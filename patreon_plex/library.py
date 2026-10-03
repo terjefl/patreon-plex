@@ -24,6 +24,10 @@ class Episode:
     def season_dir(self) -> str:
         return f"Season {self.season:02d}" if self.season < 1000 else f"Season {self.season}"
 
+    @property
+    def display_title(self) -> str:
+        return self.title or f"Episode {self.episode}"
+
     def basename(self, part: int | None = None) -> str:
         name = f"{self.show_folder} - S{self.season:02d}E{self.episode:02d}"
         if self.title:
@@ -35,7 +39,7 @@ class Episode:
 
 def write_episode_nfo(path: Path, ep: Episode) -> None:
     root = ET.Element("episodedetails")
-    ET.SubElement(root, "title").text = ep.title or ep.published.strftime("%Y-%m-%d")
+    ET.SubElement(root, "title").text = ep.display_title
     ET.SubElement(root, "showtitle").text = ep.show_folder
     ET.SubElement(root, "season").text = str(ep.season)
     ET.SubElement(root, "episode").text = str(ep.episode)

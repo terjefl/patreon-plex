@@ -41,3 +41,13 @@ def test_show_key():
 
 def test_safe_filename():
     assert safe_filename('What? A "test": yes/no') == "What A test - yes-no"
+
+
+def test_episode_display_title():
+    from datetime import UTC, datetime
+
+    from patreon_plex.library import Episode
+
+    ep = Episode("1", "Show", "Show", 1, 4, "", "", datetime(2026, 1, 1, tzinfo=UTC), "")
+    assert ep.display_title == "Episode 4"
+    assert ep.basename() == "Show - S01E04"
