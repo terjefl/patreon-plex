@@ -19,7 +19,8 @@ class CreatorConfig:
     folder: str | None = None  # subfolder of library_dir; defaults to creator_name or slug
     since: date | None = None
     max_downloads_per_run: int = 0
-    show_name_template: str = "{creator} - {show}"
+    show_name_template: str = "{creator} - {show}"  # folder name
+    show_title_template: str = "{show}"  # title shown in Plex
     misc_show_name: str = "{creator}"
     show_aliases: dict[str, str] = field(default_factory=dict)
 

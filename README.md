@@ -19,6 +19,7 @@ Mandy Cane Lane/
 
 - `Show - something` without `SxE`, where `Show` is already known, goes to that show's **Season 00** (specials).
 - Everything else goes to a show named after the creator, with one season per year, numbered in publishing order.
+- Each show gets a generated poster with its name on a frame from one of its episodes, so shows from the same creator are easy to tell apart. In Plex, shows are titled by the source show alone (`show_title_template`).
 - Title, description, date, season/episode and thumbnail are embedded in the MP4 and also written as `.nfo` and `.jpg` sidecars (read by Jellyfin, Infuse and Kodi).
 
 Videos are downloaded as-is from Patreon (typically 1080p H.264/AAC), so Plex can direct-play them.
@@ -36,6 +37,7 @@ Commands (`docker exec patreon-plex patreon-plex --config /config/config.yaml <c
 |---|---|
 | `check` | Verify the cookie |
 | `plan -n 20 [--creator SLUG]` | Show how the latest 20 posts would be named, without downloading anything |
+| `refresh-art` | Rewrite show titles, posters and backgrounds (after changing `show_title_template`) |
 | `run` | Download new posts once |
 | `loop` | Default: `run` every `interval_minutes` |
 

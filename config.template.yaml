@@ -27,6 +27,8 @@ creators:
     max_downloads_per_run: 10
     # Folder name per source show, and for posts without "SxE" in the title.
     show_name_template: "{creator} - {show}"
+    # Show title in Plex. With several creators reacting to the same show, use "{show} ({creator})".
+    show_title_template: "{show}"
     misc_show_name: "{creator}"
     # Map alternative spellings to one show name (matching ignores case, spacing and &/and).
     show_aliases: {}

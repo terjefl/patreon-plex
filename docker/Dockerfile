@@ -1,6 +1,6 @@
 FROM python:3.13-slim-bookworm
 
-RUN apt-get update && apt-get -y install --no-install-recommends ffmpeg tzdata && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get -y install --no-install-recommends ffmpeg tzdata fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

@@ -46,6 +46,7 @@ def main() -> None:
     p_plan = sub.add_parser("plan", help="show how the latest posts would be named (no downloads)")
     p_plan.add_argument("-n", type=int, default=20)
     p_plan.add_argument("--creator", help="only this creator (slug)")
+    sub.add_parser("refresh-art", help="rewrite show titles, posters and backgrounds")
     sub.add_parser("run", help="download new posts once")
     sub.add_parser("loop", help="download new posts every interval_minutes")
     args = parser.parse_args()
@@ -69,6 +70,9 @@ def main() -> None:
                 ep = h.plan(info)
                 path = h.library_dir / ep.show_folder / ep.season_dir / f"{ep.basename()}.mp4"
                 print(f"{info['title']!r}\n    -> {path.relative_to(cfg.library_dir)}")
+    elif args.command == "refresh-art":
+        for creator in cfg.creators:
+            print(f"{creator.creator}: {Harvester(cfg, creator).refresh_show_art()} show(s) refreshed")
     elif args.command == "run":
         raise SystemExit(0 if run_once(cfg) else 1)
     elif args.command == "loop":

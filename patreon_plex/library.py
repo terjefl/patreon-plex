@@ -12,6 +12,7 @@ from .titles import safe_filename
 class Episode:
     post_id: str
     show_folder: str  # e.g. "Mandy Cane Lane - Taskmaster"
+    show_title: str  # what Plex shows, e.g. "Taskmaster"
     source_show: str | None  # e.g. "Taskmaster", None for misc posts
     season: int
     episode: int
@@ -40,7 +41,7 @@ class Episode:
 def write_episode_nfo(path: Path, ep: Episode) -> None:
     root = ET.Element("episodedetails")
     ET.SubElement(root, "title").text = ep.display_title
-    ET.SubElement(root, "showtitle").text = ep.show_folder
+    ET.SubElement(root, "showtitle").text = ep.show_title
     ET.SubElement(root, "season").text = str(ep.season)
     ET.SubElement(root, "episode").text = str(ep.episode)
     ET.SubElement(root, "aired").text = ep.published.strftime("%Y-%m-%d")
@@ -52,8 +53,6 @@ def write_episode_nfo(path: Path, ep: Episode) -> None:
 
 
 def write_show_nfo(path: Path, title: str, plot: str) -> None:
-    if path.exists():
-        return
     root = ET.Element("tvshow")
     ET.SubElement(root, "title").text = title
     ET.SubElement(root, "plot").text = plot

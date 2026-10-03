@@ -48,6 +48,6 @@ def test_episode_display_title():
 
     from patreon_plex.library import Episode
 
-    ep = Episode("1", "Show", "Show", 1, 4, "", "", datetime(2026, 1, 1, tzinfo=UTC), "")
+    ep = Episode("1", "Show", "Show", "Show", 1, 4, "", "", datetime(2026, 1, 1, tzinfo=UTC), "")
     assert ep.display_title == "Episode 4"
     assert ep.basename() == "Show - S01E04"

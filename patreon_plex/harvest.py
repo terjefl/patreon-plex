@@ -15,6 +15,7 @@ from yt_dlp.utils import DownloadError
 
 from .config import Config, CreatorConfig
 from .library import Episode, write_episode_nfo, write_show_nfo
+from .poster import make_poster
 from .state import State
 from .titles import clean, parse_title, safe_filename, show_key
 
@@ -120,11 +121,13 @@ class Harvester:
 
         if show:
             folder = self.creator.show_name_template.format(creator=self.creator_name, show=show)
+            show_title = self.creator.show_title_template.format(creator=self.creator_name, show=show)
         else:
-            folder = self.creator.misc_show_name.format(creator=self.creator_name)
+            folder = show_title = self.creator.misc_show_name.format(creator=self.creator_name)
         return Episode(
             post_id=post_id,
             show_folder=safe_filename(folder),
+            show_title=show_title,
             source_show=show,
             season=season,
             episode=episode,
@@ -207,7 +210,6 @@ class Harvester:
         show_dir = self.library_dir / ep.show_folder
         season_dir = show_dir / ep.season_dir
         season_dir.mkdir(parents=True, exist_ok=True)
-        self._ensure_show_assets(show_dir, ep)
 
         entries = list(info["entries"]) if info.get("_type") == "playlist" else [info]
         files: list[Path] = []
@@ -218,8 +220,8 @@ class Harvester:
             entry.update(
                 title=ep.display_title,
                 description=ep.description,
-                show=ep.show_folder,
-                series=ep.show_folder,
+                show=ep.show_title,
+                series=ep.show_title,
                 season_number=ep.season,
                 episode_number=ep.episode,
                 artist=self.creator_name,
@@ -241,21 +243,55 @@ class Harvester:
             path = Path(result["requested_downloads"][0]["filepath"])
             write_episode_nfo(path.with_suffix(".nfo"), ep)
             files.append(path)
+        self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, files[0].with_suffix(".jpg"))
         return files
 
-    def _ensure_show_assets(self, show_dir: Path, ep: Episode) -> None:
-        if ep.source_show:
-            plot = f"{self.creator_name} reacts to {ep.source_show}."
-        else:
-            plot = f"Other videos from {self.creator_name} on Patreon."
-        write_show_nfo(show_dir / "tvshow.nfo", ep.show_folder, plot)
-        poster = show_dir / "poster.jpg"
-        if self.creator_avatar and not poster.exists():
-            try:
-                with YoutubeDL(self._params()) as ydl:
-                    poster.write_bytes(ydl.urlopen(self.creator_avatar).read())
-            except Exception as e:  # cosmetic, never fail a download over it
-                log.warning("Could not fetch poster: %s", e)
+    def _ensure_show_assets(
+        self, show_dir: Path, title: str, source_show: str | None, thumb: Path | None, force: bool = False
+    ) -> None:
+        """tvshow.nfo, plus a poster and background that tell the shows apart. Cosmetic: never fails."""
+        try:
+            if source_show:
+                plot = f"{self.creator_name} reacts to {source_show}."
+            else:
+                plot = f"Other videos from {self.creator_name} on Patreon."
+            write_show_nfo(show_dir / "tvshow.nfo", title, plot)
+            has_thumb = thumb is not None and thumb.exists()
+            poster = show_dir / "poster.jpg"
+            if force or not poster.exists():
+                if source_show and has_thumb:
+                    make_poster(thumb, title, self.creator_name, poster)
+                elif self.creator_avatar and not poster.exists():
+                    with YoutubeDL(self._params()) as ydl:
+                        poster.write_bytes(ydl.urlopen(self.creator_avatar).read())
+            fanart = show_dir / "fanart.jpg"
+            if has_thumb and (force or not fanart.exists()):
+                shutil.copyfile(thumb, fanart)
+        except Exception as e:
+            log.warning("Could not update artwork for %s: %s", show_dir.name, e)
+
+    def refresh_show_art(self) -> int:
+        """Rewrite tvshow.nfo, poster and background for every show folder in the library."""
+        if not self.library_dir.exists():
+            return 0
+        fmt = {"creator": self.creator_name}
+        by_folder: dict[str, tuple[str, str | None]] = {
+            safe_filename(self.creator.misc_show_name.format(**fmt)): (self.creator.misc_show_name.format(**fmt), None)
+        }
+        for show in {*self.state.shows.values(), *self.creator.show_aliases.values()}:
+            folder = safe_filename(self.creator.show_name_template.format(show=show, **fmt))
+            by_folder[folder] = (self.creator.show_title_template.format(show=show, **fmt), show)
+        count = 0
+        for show_dir in sorted(p for p in self.library_dir.iterdir() if p.is_dir()):
+            if show_dir.name not in by_folder:
+                log.warning("Unknown show folder %s, skipping", show_dir.name)
+                continue
+            title, source_show = by_folder[show_dir.name]
+            thumbs = sorted(show_dir.glob("*/*.jpg"), key=lambda p: p.stat().st_mtime)
+            self._ensure_show_assets(show_dir, title, source_show, thumbs[-1] if thumbs else None, force=True)
+            log.info("Refreshed artwork for %s (%s)", show_dir.name, title)
+            count += 1
+        return count
 
     # ---- orchestration -----------------------------------------------------
 
@@ -272,7 +308,8 @@ class Harvester:
         log.info("%s: %d new post(s) to download", self.creator_name, len(candidates))
         for info in candidates:
             post_id = str(info["id"])
-            log.info("Downloading %s: %s", post_id, info.get("title"))
+            post_title = info.get("title")  # download() rewrites info["title"] to the episode title
+            log.info("Downloading %s: %s", post_id, post_title)
             try:
                 files = self.download(info)
             except DownloadError as e:
@@ -280,7 +317,7 @@ class Harvester:
                 result.failed.append(post_id)
                 continue
             post = self.state.posts.setdefault(post_id, {})
-            post.update(status="done", title=info.get("title"), files=[str(f) for f in files])
+            post.update(status="done", title=post_title, files=[str(f) for f in files])
             post.pop("error", None)
             self.state.save()
             result.downloaded.append(post_id)
