@@ -38,6 +38,8 @@ Commands (`docker exec patreon-plex patreon-plex --config /config/config.yaml <c
 | `check` | Verify the cookie |
 | `plan -n 20 [--creator SLUG]` | Show how the latest 20 posts would be named, without downloading anything |
 | `refresh-art` | Rewrite show titles, posters and backgrounds (after changing `show_title_template`) |
+| `likes [--dry-run]` | Like posts whose episodes are watched in Plex |
+| `like <post id>` | Like one post, to check that liking works |
 | `run` | Download new posts once |
 | `loop` | Default: `run` every `interval_minutes` |
 
@@ -49,10 +51,16 @@ Create a **TV Shows** library and add each creator's folder (for example `Patreo
 
 `rate_limit` caps the download speed and `pause_seconds` adds a random pause between videos, and `max_downloads_per_run` spreads a large backlog over several hourly runs. Downloads are otherwise far faster than real-time playback (an hour of video in about two minutes), which is an unusual pattern for one account.
 
+## Likes for watched episodes
+
+Downloading never plays a video through Patreon's player, so the creator's statistics never show you watching. With `like_watched: true` and a `plex` section, each run likes the posts whose episodes Plex marks as watched (at most 10 per run, with a short random pause between them). Posts you already liked on Patreon are left alone, and each post is liked at most once.
+
+Try it before turning it on: `likes --dry-run` lists what would be liked, and `like <post id>` likes one post. If Patreon rejects the request, liking stops with `Liking stopped` in the log; downloads are not affected.
+
 ## Monitoring
 
 When the cookie expires, every run fails with `Patreon login expired`. Set `heartbeat_url` to an Uptime Kuma push monitor to be alerted. Export a new `cookies.txt`; the next run picks it up without a restart.
 
 ## State
 
-`data/<creator>/state.json` records which posts are handled: `done`, `no_media` (text or poll posts), `no_access` (higher tier) or `failed` (retried up to 5 times). Delete a post's entry to download it again.
+`data/<creator>/state.json` records which posts are handled: `done`, `no_media` (text or poll posts), `no_access` (not visible to your tier, e.g. a post only for free members) or `failed` (retried up to 5 times). Delete a post's entry to download it again.

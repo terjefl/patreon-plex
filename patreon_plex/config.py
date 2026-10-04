@@ -10,6 +10,7 @@ class PlexConfig:
     url: str
     token: str
     section_id: int
+    library_path: str = "/Media01/Patreon"  # library_dir as Plex sees it
 
 
 @dataclass
@@ -47,6 +48,7 @@ class Config:
     rate_limit: str | None = None
     pause_seconds: tuple[int, int] = (0, 0)
     heartbeat_url: str | None = None
+    like_watched: bool = False  # like posts on Patreon once watched in Plex (needs `plex`)
     plex: PlexConfig | None = None
 
     def find_creator(self, slug: str) -> CreatorConfig:

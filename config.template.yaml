@@ -14,11 +14,17 @@ pause_seconds: [60, 180]
 # Uptime Kuma push URL; called with status=up/down after every run.
 # heartbeat_url: https://uptime.example.com/api/push/XXXXXXXX
 
-# Trigger a library scan after new downloads.
+# Plex: used to trigger a library scan after new downloads, and to find watched episodes.
 # plex:
 #   url: http://10.11.12.16:32400
 #   token: XXXXXXXX
 #   section_id: 12
+#   library_path: /Media01/Patreon   # library_dir as Plex sees it
+
+# Like a post on Patreon once its episode is watched in Plex (needs `plex`).
+# Downloads never play through Patreon's player, so this is the creator's only sign
+# that you watch. Test first with the `likes --dry-run` and `like <post id>` commands.
+like_watched: false
 
 creators:
   # Slug from https://www.patreon.com/c/<creator>/posts

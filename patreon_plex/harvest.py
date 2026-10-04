@@ -235,7 +235,7 @@ class Harvester:
         elif "do not have access" in message:
             self.check_login()  # raises LoginExpired if the cookie died mid-run
             post["status"] = "no_access"
-            log.warning("No access to post %s (higher tier?), skipping", post_id)
+            log.warning("Post %s is not visible to you (e.g. only for free members), skipping", post_id)
         else:
             post["status"] = "failed"
             post["attempts"] = post.get("attempts", 0) + 1
