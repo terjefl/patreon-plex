@@ -101,10 +101,10 @@ class Harvester:
         description = info.get("description") or ""
         post_state = self.state.posts.setdefault(post_id, {"status": "pending"})
 
-        def numbered(counter: str) -> int:
+        def numbered(counter: str, reserved: set[int] = frozenset()) -> int:
             # Assigned once per post and remembered, so retries keep the same number.
             if "number" not in post_state:
-                post_state["number"] = self.state.next_number(counter)
+                post_state["number"] = self.state.next_number(counter, reserved)
             return post_state["number"]
 
         parsed = parse_title(title)
@@ -115,7 +115,13 @@ class Harvester:
         elif special_show:
             # "Only Fools And Horses - Dates (1988)": a known show without SxE goes to Specials.
             show = special_show
-            season, episode, ep_title = 0, numbered(f"special:{show_key(show)}"), clean(title.split(" - ", 1)[1])
+            season, ep_title = 0, clean(title.split(" - ", 1)[1])
+            table = self._specials_for(show)
+            official = _match_special(table, ep_title)
+            if official:
+                ep_title, episode = official
+            else:
+                episode = numbered(f"special:{show_key(show)}", set(table.values()))
         else:
             # Everything else: one season per year, numbered in publishing order.
             show = None
@@ -138,6 +144,12 @@ class Harvester:
             published=published,
             url=info.get("webpage_url") or "",
         )
+
+    def _specials_for(self, show: str) -> dict[str, int]:
+        for name, table in self.creator.specials.items():
+            if show_key(name) == show_key(show):
+                return table
+        return {}
 
     def _known_show_prefix(self, title: str) -> str | None:
         if " - " not in title:
@@ -353,6 +365,22 @@ class Harvester:
         self.state.save()
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
         return result
+
+
+def _special_key(title: str) -> str:
+    """'The Jolly Boys' Outing (Special)' and 'the jolly boys outing' compare equal."""
+    title = re.sub(r"\([^)]*\)", " ", title)
+    title = re.sub(r"\b(christmas\s+)?special\b", " ", title, flags=re.IGNORECASE)
+    return show_key(title)
+
+
+def _match_special(table: dict[str, int], title: str) -> tuple[str, int] | None:
+    """Official (title, number) for a special, from the configured `specials` table."""
+    key = _special_key(title)
+    for name, number in table.items():
+        if _special_key(name) == key:
+            return name, number
+    return None
 
 
 def _post_id(entry: dict) -> str:

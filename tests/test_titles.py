@@ -51,3 +51,21 @@ def test_episode_display_title():
     ep = Episode("1", "Show", "Show", "Show", 1, 4, "", "", datetime(2026, 1, 1, tzinfo=UTC), "")
     assert ep.display_title == "Episode 4"
     assert ep.basename() == "Show - S01E04"
+
+
+def test_match_special():
+    from patreon_plex.harvest import _match_special
+
+    table = {"Dates": 8, "The Jolly Boys' Outing": 9, "Rodney Come Home": 10}
+    assert _match_special(table, "The Jolly Boys' Outing (Special)") == ("The Jolly Boys' Outing", 9)
+    assert _match_special(table, "Dates (1988)") == ("Dates", 8)
+    assert _match_special(table, "Rodney Come Home") == ("Rodney Come Home", 10)
+    assert _match_special(table, "Miami Twice") is None
+
+
+def test_next_number_skips_reserved(tmp_path):
+    from patreon_plex.state import State
+
+    s = State(tmp_path / "state.json")
+    assert s.next_number("special:x", {1, 2, 4}) == 3
+    assert s.next_number("special:x", {1, 2, 4}) == 5

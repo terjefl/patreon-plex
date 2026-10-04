@@ -33,3 +33,10 @@ creators:
     # Map alternative spellings to one show name (matching ignores case, spacing and &/and).
     show_aliases: {}
     #   "Fools and Horses": "Only Fools And Horses"
+    # Official special (Season 00) numbers, e.g. from TheTVDB. A post "Show - <special>"
+    # whose title matches (ignoring case, punctuation, "(...)" and "Special") gets that
+    # number and the official title; other specials are numbered around them.
+    specials: {}
+    #   Only Fools And Horses:
+    #     Dates: 8
+    #     The Jolly Boys' Outing: 9

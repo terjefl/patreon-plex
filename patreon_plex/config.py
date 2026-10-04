@@ -23,6 +23,8 @@ class CreatorConfig:
     show_title_template: str = "{show}"  # title shown in Plex
     misc_show_name: str = "{creator}"
     show_aliases: dict[str, str] = field(default_factory=dict)
+    # Official special numbers per show, e.g. {"Only Fools And Horses": {"Dates": 8}}
+    specials: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def campaign_url(self) -> str:

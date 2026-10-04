@@ -17,7 +17,7 @@ Mandy Cane Lane/
         └── Mandy Cane Lane - Taskmaster - S21E01 - Cube Is Good.nfo
 ```
 
-- `Show - something` without `SxE`, where `Show` is already known, goes to that show's **Season 00** (specials).
+- `Show - something` without `SxE`, where `Show` is already known, goes to that show's **Season 00** (specials). List official special numbers under `specials` in the config (for example from TheTVDB) and matching posts get those numbers and titles; the rest are numbered around them.
 - Everything else goes to a show named after the creator, with one season per year, numbered in publishing order.
 - Each show gets a generated poster with its name on a frame from one of its episodes, so shows from the same creator are easy to tell apart. In Plex, shows are titled by the source show alone (`show_title_template`).
 - Title, description, date, season/episode and thumbnail are embedded in the MP4 and also written as `.nfo` and `.jpg` sidecars (read by Jellyfin, Infuse and Kodi).
