@@ -69,3 +69,14 @@ def test_next_number_skips_reserved(tmp_path):
     s = State(tmp_path / "state.json")
     assert s.next_number("special:x", {1, 2, 4}) == 3
     assert s.next_number("special:x", {1, 2, 4}) == 5
+
+
+def test_config_throttle(tmp_path):
+    from patreon_plex.config import load_config
+
+    p = tmp_path / "c.yaml"
+    p.write_text("library_dir: /l\ncookies_file: /c\ndata_dir: /d\nrate_limit: 4M\npause_seconds: [60, 180]\ncreators:\n  - creator: X\n")
+    cfg = load_config(p)
+    assert cfg.rate_limit == "4M" and cfg.pause_seconds == (60, 180)
+    p.write_text("library_dir: /l\ncookies_file: /c\ndata_dir: /d\ncreators:\n  - creator: X\n")
+    assert load_config(p).pause_seconds == (0, 0)

@@ -42,6 +42,10 @@ class Config:
     data_dir: Path
     creators: list[CreatorConfig]
     interval_minutes: int = 60
+    # Throttling, so a backlog doesn't look like a scraper: max download speed
+    # (yt-dlp syntax, e.g. "4M" = 4 MiB/s) and a random pause between videos.
+    rate_limit: str | None = None
+    pause_seconds: tuple[int, int] = (0, 0)
     heartbeat_url: str | None = None
     plex: PlexConfig | None = None
 
@@ -67,8 +71,12 @@ def load_config(path: Path) -> Config:
         raise SystemExit("Config needs at least one entry under 'creators'")
     for key in ("library_dir", "cookies_file", "data_dir"):
         raw[key] = Path(raw[key])
+    pause = raw.pop("pause_seconds", None)
+    if isinstance(pause, (int, float)):
+        pause = (pause, pause)
     return Config(
         **raw,
+        pause_seconds=tuple(pause) if pause else (0, 0),
         creators=creators,
         plex=PlexConfig(**plex) if plex and plex.get("token") else None,
     )

@@ -5,6 +5,12 @@ data_dir: /data                    # per-creator state.json and temporary files
 
 interval_minutes: 60
 
+# Throttling, so a large backlog looks less like a scraper.
+# Max download speed (yt-dlp syntax: "4M" = 4 MiB/s; omit for unlimited) and a random
+# pause between videos in seconds ([min, max], or one number).
+rate_limit: 4M
+pause_seconds: [60, 180]
+
 # Uptime Kuma push URL; called with status=up/down after every run.
 # heartbeat_url: https://uptime.example.com/api/push/XXXXXXXX
 

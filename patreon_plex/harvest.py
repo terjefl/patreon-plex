@@ -1,8 +1,10 @@
 import io
 import json
+import random
 import logging
 import re
 import shutil
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -13,7 +15,7 @@ from PIL import Image
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
 from yt_dlp.networking.exceptions import HTTPError
-from yt_dlp.utils import DownloadError
+from yt_dlp.utils import DownloadError, parse_bytes
 
 from .config import Config, CreatorConfig
 from .library import Episode, write_episode_nfo, write_show_nfo
@@ -67,6 +69,7 @@ class Harvester:
             "fragment_retries": 10,
             "concurrent_fragment_downloads": 4,
             "logger": log,
+            "ratelimit": parse_bytes(self.cfg.rate_limit) if self.cfg.rate_limit else None,
             **extra,
         }
 
@@ -310,6 +313,13 @@ class Harvester:
         except Exception as e:
             log.warning("Could not update artwork for %s: %s", show_dir.name, e)
 
+    def _pause(self) -> None:
+        low, high = self.cfg.pause_seconds
+        if high > 0:
+            seconds = random.uniform(low, high)
+            log.info("Pausing %.0f s before next download", seconds)
+            time.sleep(seconds)
+
     def refresh_show_art(self) -> int:
         """Rewrite tvshow.nfo, poster and background for every show folder in the library."""
         if not self.library_dir.exists():
@@ -346,7 +356,9 @@ class Harvester:
             result.pending = len(candidates) - max_dl
             candidates = candidates[:max_dl]
         log.info("%s: %d new post(s) to download", self.creator_name, len(candidates))
-        for info in candidates:
+        for i, info in enumerate(candidates):
+            if i:
+                self._pause()
             post_id = str(info["id"])
             post_title = info.get("title")  # download() rewrites info["title"] to the episode title
             log.info("Downloading %s: %s", post_id, post_title)

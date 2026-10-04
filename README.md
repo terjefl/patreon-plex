@@ -45,6 +45,10 @@ Commands (`docker exec patreon-plex patreon-plex --config /config/config.yaml <c
 
 Create a **TV Shows** library and add each creator's folder (for example `Patreon/Mandy Cane Lane`) as a folder in it. Plex expects the show folders directly under each library folder. Choose the **Plex NFO Series** agent with the **Plex TV Series** scanner. It reads the `.nfo` sidecars, so titles, descriptions, dates, posters and episode thumbnails all show up, and Plex doesn't try to match the folders against real TV shows.
 
+## Throttling
+
+`rate_limit` caps the download speed and `pause_seconds` adds a random pause between videos, and `max_downloads_per_run` spreads a large backlog over several hourly runs. Downloads are otherwise far faster than real-time playback (an hour of video in about two minutes), which is an unusual pattern for one account.
+
 ## Monitoring
 
 When the cookie expires, every run fails with `Patreon login expired`. Set `heartbeat_url` to an Uptime Kuma push monitor to be alerted. Export a new `cookies.txt`; the next run picks it up without a restart.
