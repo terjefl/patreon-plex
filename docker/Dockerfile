@@ -4,6 +4,9 @@ RUN apt-get update && apt-get -y install --no-install-recommends ffmpeg tzdata f
 
 WORKDIR /app
 
+# Single-purpose container: no system Python to protect, so silence pip's root-user warning.
+ENV PIP_ROOT_USER_ACTION=ignore
+
 COPY pyproject.toml README.md ./
 COPY patreon_plex patreon_plex
 
