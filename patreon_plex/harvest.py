@@ -367,6 +367,10 @@ class Harvester:
     # ---- orchestration -----------------------------------------------------
 
     def run(self) -> RunResult:
+        # A run that was interrupted (container restart, crash) never reached the cleanup
+        # at the end, so start from an empty tmp dir. The cost is that a half-finished
+        # download starts over instead of resuming.
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
         self.refresh_cookies()
         user = self.check_login()
         log.info("Logged in to Patreon as %s", user)
