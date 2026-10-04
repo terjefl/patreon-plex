@@ -1,6 +1,7 @@
 """Index page: every downloaded episode, with links, Plex watched status and Patreon likes."""
 
 import html
+import json
 import logging
 import threading
 import time
@@ -30,6 +31,7 @@ class Row:
     liked: bool | None  # None = not checked yet
     patreon_url: str
     plex_url: str
+    rating_key: str
 
     @property
     def code(self) -> str:
@@ -68,6 +70,7 @@ class Index:
                         liked=likes[post_id]["liked"] if post_id in likes else None,
                         patreon_url=f"https://www.patreon.com/posts/{post_id}",
                         plex_url=plex.web_link(self.cfg, ep.rating_key),
+                        rating_key=ep.rating_key,
                     )
                 )
         self._cache = (time.time(), rows)
@@ -91,6 +94,15 @@ class Index:
         threading.Thread(target=work, daemon=True).start()
         return True
 
+    def set_watched(self, keys: list[str], watched: bool) -> int:
+        """Mark episodes (Plex rating keys) as watched/unwatched; only keys listed on the page."""
+        allowed = {r.rating_key for r in self.rows()}
+        keys = [k for k in keys if k in allowed]
+        for key in keys:
+            (plex.mark_watched if watched else plex.mark_unwatched)(self.cfg, key)
+        self._cache = None
+        return len(keys)
+
     @property
     def refreshing(self) -> bool:
         return self._refreshing.locked()
@@ -107,14 +119,23 @@ def _badge(value: bool | None, yes: str, no: str) -> str:
     return f'<span class="b {cls}" title="{label}"><span class="long">{label}</span><span class="short">{short}</span></span>'
 
 
+def _watched_button(r: Row) -> str:
+    label, short, cls = ("Sett", "✓", "yes") if r.watched else ("Ikke sett", "✗", "no")
+    return (
+        f'<button class="b {cls} wbtn" data-key="{_e(r.rating_key)}" data-watched="{int(r.watched)}" '
+        f'title="Klikk for å merke som {"ikke sett" if r.watched else "sett"} i Plex">'
+        f'<span class="long">{label}</span><span class="short">{short}</span></button>'
+    )
+
+
 def _row_html(r: Row, show_name: bool = False) -> str:
     cls = " ".join(c for c, on in (("unwatched", not r.watched), ("unliked", r.liked is not True)) if on)
     show = f'<span class="show">{_e(r.show)}</span> ' if show_name else ""
     return (
-        f'<tr class="{cls}"><td class="code">{_e(r.code)}</td>'
+        f'<tr class="{cls}" data-key="{_e(r.rating_key)}"><td class="code">{_e(r.code)}</td>'
         f"<td>{show}{_e(r.title)}</td>"
         f'<td class="date">{_e(r.aired)}</td>'
-        f"<td>{_badge(r.watched, 'Sett', 'Ikke sett')}</td>"
+        f"<td>{_watched_button(r)}</td>"
         f"<td>{_badge(r.liked, 'Likt', 'Ikke likt')}</td>"
         f'<td class="links"><a href="{_e(r.patreon_url)}" target="_blank" rel="noopener">Patreon</a>'
         f'<a href="{_e(r.plex_url)}" target="_blank" rel="noopener">Plex</a></td></tr>'
@@ -144,9 +165,13 @@ def render(index: Index) -> str:
         eps = sorted(shows[key], key=lambda r: (r.season == 0, r.season, r.episode))
         seen = sum(r.watched for r in eps)
         body = "".join(_row_html(r) for r in eps)
+        unseen = [r.rating_key for r in eps if not r.watched]
+        all_btn = (
+            f'<button class="allbtn" data-keys="{_e(",".join(unseen))}">Merk alle som sett</button>' if unseen else ""
+        )
         parts.append(
             f"<details open><summary><h2>{_e(key[1])}</h2>"
-            f'<span class="meta">{len(eps)} ep · {seen} sett</span></summary>'
+            f'<span class="meta">{all_btn}{len(eps)} ep · {seen} sett</span></summary>'
             f"<table>{head}<tbody>{body}</tbody></table></details>"
         )
 
@@ -202,6 +227,9 @@ th, td {{ padding:6px 8px; border-top:1px solid var(--line); vertical-align:midd
 .b {{ display:inline-block; font-size:12px; border-radius:6px; padding:1px 7px; white-space:nowrap }}
 .yes {{ color:var(--yes); background:var(--yes-bg) }} .no {{ color:var(--no); background:var(--no-bg) }}
 .unk {{ color:var(--unk); background:var(--unk-bg) }} .short {{ display:none }}
+button.b {{ border:0; font:inherit; font-size:12px; cursor:pointer }} button.b:hover {{ outline:1px solid currentColor }}
+button.b[disabled], .allbtn[disabled] {{ opacity:.5; cursor:wait }}
+.allbtn {{ font-size:12px; padding:2px 10px; margin-right:10px }}
 .links {{ white-space:nowrap; text-align:right }} .links a {{ color:var(--accent); margin-left:10px; text-decoration:none }}
 .links a:hover {{ text-decoration:underline }}
 body.f-unwatched tbody tr:not(.unwatched), body.f-unliked tbody tr:not(.unliked) {{ display:none }}
@@ -225,6 +253,35 @@ footer {{ color:var(--muted); font-size:13px; margin-top:24px }}
 document.querySelectorAll('.filters input').forEach(i => i.addEventListener('change', () => {{
   document.body.className = i.value; try {{ localStorage.setItem('f', i.value) }} catch (e) {{}}
 }}));
+async function setWatched(keys, watched) {{
+  const r = await fetch('watched', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ keys, watched }}) }});
+  if (!r.ok) throw new Error(await r.text());
+}}
+function paint(key, watched) {{
+  document.querySelectorAll(`.wbtn[data-key="${{key}}"]`).forEach(b => {{
+    b.dataset.watched = watched ? '1' : '0';
+    b.classList.toggle('yes', watched); b.classList.toggle('no', !watched);
+    b.querySelector('.long').textContent = watched ? 'Sett' : 'Ikke sett';
+    b.querySelector('.short').textContent = watched ? '✓' : '✗';
+    b.closest('tr').classList.toggle('unwatched', !watched);
+  }});
+}}
+document.addEventListener('click', async e => {{
+  const b = e.target.closest('.wbtn, .allbtn');
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  b.disabled = true;
+  try {{
+    if (b.classList.contains('wbtn')) {{
+      const watched = b.dataset.watched !== '1';
+      await setWatched([b.dataset.key], watched); paint(b.dataset.key, watched);
+    }} else {{
+      await setWatched(b.dataset.keys.split(','), true); location.reload(); return;
+    }}
+  }} catch (err) {{ alert('Klarte ikke å oppdatere Plex: ' + err.message); }}
+  b.disabled = false;
+}});
 try {{ const f = localStorage.getItem('f'); if (f) {{ const i = document.querySelector(`.filters input[value="${{f}}"]`);
   if (i) {{ i.checked = true; document.body.className = f }} }} }} catch (e) {{}}
 </script>
@@ -263,6 +320,14 @@ def serve(cfg: Config, port: int) -> ThreadingHTTPServer:
             if self.path == "/refresh":
                 index.refresh_likes()
                 self._send(303, headers=[("Location", "./")])
+            elif self.path == "/watched":
+                try:
+                    body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                    n = index.set_watched([str(k) for k in body.get("keys", [])], bool(body.get("watched")))
+                    self._send(200, json.dumps({"updated": n}), "application/json")
+                except Exception as e:
+                    log.exception("Updating watched status failed")
+                    self._send(500, str(e), "text/plain")
             else:
                 self._send(404, "Not found", "text/plain")
 

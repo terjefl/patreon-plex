@@ -76,3 +76,10 @@ def mark_watched(cfg: Config, rating_key: str) -> None:
         {"identifier": "com.plexapp.plugins.library", "key": rating_key, "X-Plex-Token": cfg.plex.token}
     )
     urllib.request.urlopen(f"{cfg.plex.url.rstrip('/')}/:/scrobble?{query}", timeout=30).read()
+
+
+def mark_unwatched(cfg: Config, rating_key: str) -> None:
+    query = urllib.parse.urlencode(
+        {"identifier": "com.plexapp.plugins.library", "key": rating_key, "X-Plex-Token": cfg.plex.token}
+    )
+    urllib.request.urlopen(f"{cfg.plex.url.rstrip('/')}/:/unscrobble?{query}", timeout=30).read()
