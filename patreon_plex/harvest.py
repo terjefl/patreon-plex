@@ -164,7 +164,13 @@ class Harvester:
     # ---- listing -----------------------------------------------------------
 
     def collect(self, limit: int | None = None) -> list[dict]:
-        """Return full info dicts for unhandled posts, oldest first."""
+        """Return unhandled posts, oldest first.
+
+        Normally these are stubs ({id, title, timestamp}) from the state cache: a post is
+        only looked up on Patreon the first time it is seen, so a backlog spread over many
+        runs doesn't re-query hundreds of posts every hour. Call `extract()` before
+        downloading one. With `limit` (the plan command) they are full info dicts.
+        """
         candidates: list[dict] = []
         known_streak = old_streak = 0
         with YoutubeDL(self._params(extract_flat="in_playlist")) as ydl:
@@ -183,11 +189,18 @@ class Harvester:
                         break
                     continue
                 known_streak = 0
-                try:
-                    info = ydl.extract_info(f"https://www.patreon.com/posts/{post_id}", download=False, process=False)
-                except DownloadError as e:
-                    self._record_error(post_id, str(e))
-                    continue
+                cached = self.state.posts.get(post_id, {})
+                if limit is None and "published" in cached:
+                    info = {"id": post_id, "title": cached.get("title"), "timestamp": cached["published"], "stub": True}
+                else:
+                    try:
+                        info = ydl.extract_info(f"https://www.patreon.com/posts/{post_id}", download=False, process=False)
+                    except DownloadError as e:
+                        self._record_error(post_id, str(e))
+                        continue
+                    if limit is None:
+                        post = self.state.posts.setdefault(post_id, {"status": "pending"})
+                        post.update(published=info["timestamp"], title=info.get("title"))
                 published = datetime.fromtimestamp(info["timestamp"], tz=UTC).date()
                 if self.creator.since and published < self.creator.since:
                     old_streak += 1
@@ -198,6 +211,7 @@ class Harvester:
                 candidates.append(info)
                 if limit and len(candidates) >= limit:
                     break
+        self.state.save()
         # Register every show seen in this batch up front, so "Show - Special" posted
         # before the show's first SxE episode still lands in that show's Season 00.
         for info in candidates:
@@ -205,6 +219,13 @@ class Harvester:
             if parsed:
                 self._canonical_show(parsed.show)
         return list(reversed(candidates))
+
+    def extract(self, info: dict) -> dict:
+        """Full info for a post (a no-op unless `info` is a cached stub)."""
+        if not info.get("stub"):
+            return info
+        with YoutubeDL(self._params()) as ydl:
+            return ydl.extract_info(f"https://www.patreon.com/posts/{info['id']}", download=False, process=False)
 
     def _record_error(self, post_id: str, message: str) -> None:
         post = self.state.posts.setdefault(post_id, {"status": "pending"})
@@ -363,7 +384,7 @@ class Harvester:
             post_title = info.get("title")  # download() rewrites info["title"] to the episode title
             log.info("Downloading %s: %s", post_id, post_title)
             try:
-                files = self.download(info)
+                files = self.download(self.extract(info))
             except DownloadError as e:
                 self._record_error(post_id, str(e))
                 result.failed.append(post_id)
