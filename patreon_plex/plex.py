@@ -69,3 +69,10 @@ def web_link(cfg: Config, rating_key: str) -> str:
     server = machine_id(cfg.plex.url, cfg.plex.token)
     key = urllib.parse.quote(f"/library/metadata/{rating_key}", safe="")
     return f"https://app.plex.tv/desktop/#!/server/{server}/details?key={key}"
+
+
+def mark_watched(cfg: Config, rating_key: str) -> None:
+    query = urllib.parse.urlencode(
+        {"identifier": "com.plexapp.plugins.library", "key": rating_key, "X-Plex-Token": cfg.plex.token}
+    )
+    urllib.request.urlopen(f"{cfg.plex.url.rstrip('/')}/:/scrobble?{query}", timeout=30).read()

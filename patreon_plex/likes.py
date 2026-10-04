@@ -19,6 +19,7 @@ from yt_dlp.networking import Request
 from . import plex
 from .config import Config, CreatorConfig
 from .harvest import Harvester
+from .state import State
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ _lock = threading.Lock()
 
 
 class LikeStore:
-    """data/<creator>/likes.json: {post_id: {"liked": bool, "checked": epoch}}"""
+    """data/<creator>/likes.json: {post_id: {"liked": bool, "checked": epoch, "marked_watched": epoch}}"""
 
     def __init__(self, cfg: Config, creator: CreatorConfig):
         self.path = cfg.data_dir / creator.creator / "likes.json"
@@ -42,10 +43,13 @@ class LikeStore:
         except FileNotFoundError:
             return {}
 
-    def update(self, post_id: str, liked: bool) -> None:
+    def update(self, post_id: str, liked: bool | None = None, **extra) -> None:
         with _lock:
             data = self.load()
-            data[post_id] = {"liked": liked, "checked": int(time.time())}
+            entry = data.setdefault(post_id, {})
+            if liked is not None:
+                entry.update(liked=liked, checked=int(time.time()))
+            entry.update(extra)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=1))
@@ -63,7 +67,7 @@ def has_liked(ydl: YoutubeDL, post_id: str) -> bool:
     return bool(data["data"]["attributes"].get("current_user_has_liked"))
 
 
-def check_likes(cfg: Config, creator: CreatorConfig, only_watched: bool = False) -> int:
+def check_likes(cfg: Config, creator: CreatorConfig, only_watched: bool = False, all_posts: bool = False) -> int:
     """Refresh like status: all watched-but-not-liked posts, plus a few stale/unknown ones."""
     h = Harvester(cfg, creator, dry_run=True)
     h.refresh_cookies()
@@ -78,7 +82,7 @@ def check_likes(cfg: Config, creator: CreatorConfig, only_watched: bool = False)
     if not only_watched:
         others = [pid for pid in set(by_file.values()) - set(urgent) if known.get(pid, {}).get("checked", 0) < stale_before]
         others.sort(key=lambda pid: known.get(pid, {}).get("checked", 0))
-        background = others[:BACKGROUND_CHECKS_PER_RUN]
+        background = others if all_posts else others[:BACKGROUND_CHECKS_PER_RUN]
 
     checked = 0
     with YoutubeDL(h._params()) as ydl:
@@ -93,3 +97,26 @@ def check_likes(cfg: Config, creator: CreatorConfig, only_watched: bool = False)
     if checked:
         log.info("%s: checked like status for %d post(s)", h.creator_name, checked)
     return checked
+
+
+def mark_liked_watched(cfg: Config, creator: CreatorConfig) -> int:
+    """Mark episodes as watched in Plex when you have liked the post on Patreon.
+
+    A like means you have seen it (often before it was downloaded). Each episode is marked
+    at most once, so setting one back to unwatched in Plex sticks.
+    """
+    by_file = post_files(State(cfg.data_dir / creator.creator / "state.json").posts)
+    store = LikeStore(cfg, creator)
+    known = store.load()
+    marked = 0
+    for ep in plex.episodes(cfg):
+        pid = by_file.get(ep.path)
+        if not pid or ep.watched:
+            continue
+        info = known.get(pid, {})
+        if info.get("liked") and not info.get("marked_watched"):
+            plex.mark_watched(cfg, ep.rating_key)
+            store.update(pid, marked_watched=int(time.time()))
+            log.info("Marked as watched in Plex (liked on Patreon): %s %s", ep.show, ep.title)
+            marked += 1
+    return marked
