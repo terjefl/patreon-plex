@@ -38,8 +38,7 @@ Commands (`docker exec patreon-plex patreon-plex --config /config/config.yaml <c
 | `check` | Verify the cookie |
 | `plan -n 20 [--creator SLUG]` | Show how the latest 20 posts would be named, without downloading anything |
 | `refresh-art` | Rewrite show titles, posters and backgrounds (after changing `show_title_template`) |
-| `likes [--dry-run]` | Like posts whose episodes are watched in Plex |
-| `like <post id>` | Like one post, to check that liking works |
+| `likes` | Refresh which posts you have liked on Patreon |
 | `run` | Download new posts once |
 | `loop` | Default: `run` every `interval_minutes` |
 
@@ -51,11 +50,13 @@ Create a **TV Shows** library and add each creator's folder (for example `Patreo
 
 `rate_limit` caps the download speed and `pause_seconds` adds a random pause between videos, and `max_downloads_per_run` spreads a large backlog over several hourly runs. Downloads are otherwise far faster than real-time playback (an hour of video in about two minutes), which is an unusual pattern for one account.
 
-## Likes for watched episodes
+## Index page
 
-Downloading never plays a video through Patreon's player, so the creator's statistics never show you watching. With `like_watched: true` and a `plex` section, each run likes the posts whose episodes Plex marks as watched (at most 10 per run, with a short random pause between them). Posts you already liked on Patreon are left alone, and each post is liked at most once.
+With a `plex` section, the container serves an index page on `web_port` (default 8000): every downloaded episode grouped by show, with links to the Patreon post and the Plex episode, whether you have watched it in Plex, and whether you have liked it on Patreon. "Watched, not liked" is listed at the top, so you can like what you have seen.
 
-Try it before turning it on: `likes --dry-run` lists what would be liked, and `like <post id>` likes one post. If Patreon rejects the request, liking stops with `Liking stopped` in the log; downloads are not affected.
+The page has no login of its own; put it behind an authenticating proxy (for example Cloudflare Access).
+
+Downloads never play through Patreon's player, so the creator's statistics never show you watching; a like is the signal she does get. Liking can't be automated: Patreon rejects like requests without the web app's CSRF token. Like status is read-only: each run checks every watched-but-not-liked post, plus 20 others not checked in the last week. The page's button re-checks the watched ones on demand.
 
 ## Monitoring
 

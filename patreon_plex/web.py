@@ -1,0 +1,275 @@
+"""Index page: every downloaded episode, with links, Plex watched status and Patreon likes."""
+
+import html
+import logging
+import threading
+import time
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from . import plex
+from .config import Config
+from .likes import LikeStore, check_likes, post_files
+from .state import State
+
+log = logging.getLogger(__name__)
+
+CACHE_SECONDS = 60
+
+
+@dataclass
+class Row:
+    creator: str
+    show: str
+    season: int
+    episode: int
+    title: str
+    aired: str
+    watched: bool
+    liked: bool | None  # None = not checked yet
+    patreon_url: str
+    plex_url: str
+
+    @property
+    def code(self) -> str:
+        return f"S{self.season:02d}E{self.episode:02d}" if self.season < 1000 else f"{self.season} #{self.episode}"
+
+
+class Index:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self._cache: tuple[float, list[Row]] | None = None
+        self._refreshing = threading.Lock()
+
+    def rows(self) -> list[Row]:
+        if self._cache and time.time() - self._cache[0] < CACHE_SECONDS:
+            return self._cache[1]
+        episodes = plex.episodes(self.cfg)
+        rows: list[Row] = []
+        for creator in self.cfg.creators:
+            state = State(self.cfg.data_dir / creator.creator / "state.json")
+            by_file = post_files(state.posts)
+            likes = LikeStore(self.cfg, creator).load()
+            name = creator.creator_name or creator.creator
+            for ep in episodes:
+                post_id = by_file.get(ep.path)
+                if not post_id:
+                    continue
+                rows.append(
+                    Row(
+                        creator=name,
+                        show=ep.show,
+                        season=ep.season,
+                        episode=ep.episode,
+                        title=ep.title,
+                        aired=ep.aired,
+                        watched=ep.watched,
+                        liked=likes[post_id]["liked"] if post_id in likes else None,
+                        patreon_url=f"https://www.patreon.com/posts/{post_id}",
+                        plex_url=plex.web_link(self.cfg, ep.rating_key),
+                    )
+                )
+        self._cache = (time.time(), rows)
+        return rows
+
+    def refresh_likes(self) -> bool:
+        """Re-check likes for watched posts in the background. False if already running."""
+        if not self._refreshing.acquire(blocking=False):
+            return False
+
+        def work():
+            try:
+                for creator in self.cfg.creators:
+                    check_likes(self.cfg, creator, only_watched=True)
+            except Exception:
+                log.exception("Like refresh failed")
+            finally:
+                self._cache = None
+                self._refreshing.release()
+
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    @property
+    def refreshing(self) -> bool:
+        return self._refreshing.locked()
+
+
+def _e(text) -> str:
+    return html.escape(str(text))
+
+
+def _badge(value: bool | None, yes: str, no: str) -> str:
+    if value is None:
+        return '<span class="b unk" title="Ikke sjekket ennå">?</span>'
+    label, short, cls = (yes, "✓", "yes") if value else (no, "✗", "no")
+    return f'<span class="b {cls}" title="{label}"><span class="long">{label}</span><span class="short">{short}</span></span>'
+
+
+def _row_html(r: Row, show_name: bool = False) -> str:
+    cls = " ".join(c for c, on in (("unwatched", not r.watched), ("unliked", r.liked is not True)) if on)
+    show = f'<span class="show">{_e(r.show)}</span> ' if show_name else ""
+    return (
+        f'<tr class="{cls}"><td class="code">{_e(r.code)}</td>'
+        f"<td>{show}{_e(r.title)}</td>"
+        f'<td class="date">{_e(r.aired)}</td>'
+        f"<td>{_badge(r.watched, 'Sett', 'Ikke sett')}</td>"
+        f"<td>{_badge(r.liked, 'Likt', 'Ikke likt')}</td>"
+        f'<td class="links"><a href="{_e(r.patreon_url)}" target="_blank" rel="noopener">Patreon</a>'
+        f'<a href="{_e(r.plex_url)}" target="_blank" rel="noopener">Plex</a></td></tr>'
+    )
+
+
+def render(index: Index) -> str:
+    rows = index.rows()
+    todo = sorted((r for r in rows if r.watched and r.liked is not True), key=lambda r: r.aired)
+    shows: dict[tuple[str, str], list[Row]] = {}
+    for r in rows:
+        shows.setdefault((r.creator, r.show), []).append(r)
+    # Creator's own "misc" show last, the rest alphabetically
+    order = sorted(shows, key=lambda k: (k[1] == k[0], k[1].casefold()))
+
+    head = "<thead><tr><th>Ep.</th><th>Tittel</th><th>Dato</th><th>Sett</th><th>Likt</th><th></th></tr></thead>"
+    parts = []
+    if todo:
+        body = "".join(_row_html(r, show_name=True) for r in todo)
+        parts.append(
+            f'<section class="todo"><h2>Sett, men ikke likt <span class="n">{len(todo)}</span></h2>'
+            f"<table>{head}<tbody>{body}</tbody></table></section>"
+        )
+    else:
+        parts.append('<section class="todo done"><h2>Alt du har sett er likt 👍</h2></section>')
+    for key in order:
+        eps = sorted(shows[key], key=lambda r: (r.season == 0, r.season, r.episode))
+        seen = sum(r.watched for r in eps)
+        body = "".join(_row_html(r) for r in eps)
+        parts.append(
+            f"<details open><summary><h2>{_e(key[1])}</h2>"
+            f'<span class="meta">{len(eps)} ep · {seen} sett</span></summary>'
+            f"<table>{head}<tbody>{body}</tbody></table></details>"
+        )
+
+    watched = sum(r.watched for r in rows)
+    liked = sum(r.liked is True for r in rows)
+    refresh = (
+        '<button disabled>Sjekker likerklikk …</button>'
+        if index.refreshing
+        else '<form method="post" action="refresh"><button>Sjekk likerklikk nå</button></form>'
+    )
+    return PAGE.format(
+        summary=f"{len(rows)} episoder · {watched} sett · {liked} likt",
+        refresh=refresh,
+        content="".join(parts),
+        updated=time.strftime("%d.%m.%Y %H:%M"),
+    )
+
+
+PAGE = """<!doctype html>
+<html lang="no"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patreon-videoer</title>
+<style>
+:root {{ --bg:#f6f5f2; --fg:#1d1d1f; --muted:#6b6b70; --card:#fff; --line:#e4e2dd; --accent:#e5622b;
+  --yes:#1f7a3f; --yes-bg:#e3f3e8; --no:#8a5a00; --no-bg:#fbefd5; --unk:#6b6b70; --unk-bg:#ecebe8; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg:#141416; --fg:#ececee; --muted:#9a9aa1; --card:#1e1e21;
+  --line:#2e2e33; --accent:#ff7a45; --yes:#6fd393; --yes-bg:#1d3326; --no:#f2c46b; --no-bg:#3a2f17;
+  --unk:#9a9aa1; --unk-bg:#2a2a2e; }} }}
+* {{ box-sizing:border-box }}
+body {{ margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 -apple-system,system-ui,Segoe UI,Roboto,sans-serif }}
+main {{ max-width:1000px; margin:0 auto; padding:24px 16px 64px }}
+header {{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:20px }}
+h1 {{ margin:0; font-size:24px }} .sub {{ color:var(--muted) }}
+h2 {{ display:inline; font-size:17px; margin:0 }}
+.filters {{ display:flex; gap:6px; flex-wrap:wrap }}
+button, .filters label {{ font:inherit; border:1px solid var(--line); background:var(--card); color:var(--fg);
+  border-radius:999px; padding:6px 12px; cursor:pointer }}
+.filters input {{ display:none }} .filters input:checked + span {{ color:var(--accent); font-weight:600 }}
+section, details {{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin:12px 0 }}
+.todo {{ border-color:var(--accent) }} .todo.done {{ border-color:var(--line) }}
+.n {{ background:var(--accent); color:#fff; border-radius:999px; padding:1px 8px; font-size:13px; margin-left:6px }}
+summary {{ cursor:pointer; list-style:none; display:flex; justify-content:space-between; align-items:baseline; gap:8px }}
+summary::-webkit-details-marker {{ display:none }}
+.meta {{ color:var(--muted); font-size:13px; white-space:nowrap }}
+table {{ width:100%; border-collapse:collapse; margin-top:8px; table-layout:fixed }}
+th:nth-child(1) {{ width:84px }} th:nth-child(3) {{ width:104px }} th:nth-child(4) {{ width:84px }}
+th:nth-child(5) {{ width:92px }} th:nth-child(6) {{ width:120px }}
+td:nth-child(2) {{ overflow-wrap:anywhere }}
+th {{ text-align:left; color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.04em }}
+th, td {{ padding:6px 8px; border-top:1px solid var(--line); vertical-align:middle }}
+.code, .date {{ white-space:nowrap; font-variant-numeric:tabular-nums; color:var(--muted) }}
+.show {{ color:var(--muted) }}
+.b {{ display:inline-block; font-size:12px; border-radius:6px; padding:1px 7px; white-space:nowrap }}
+.yes {{ color:var(--yes); background:var(--yes-bg) }} .no {{ color:var(--no); background:var(--no-bg) }}
+.unk {{ color:var(--unk); background:var(--unk-bg) }} .short {{ display:none }}
+.links {{ white-space:nowrap; text-align:right }} .links a {{ color:var(--accent); margin-left:10px; text-decoration:none }}
+.links a:hover {{ text-decoration:underline }}
+body.f-unwatched tbody tr:not(.unwatched), body.f-unliked tbody tr:not(.unliked) {{ display:none }}
+footer {{ color:var(--muted); font-size:13px; margin-top:24px }}
+@media (max-width:640px) {{ .date, th:nth-child(3) {{ display:none }} th, td {{ padding:6px 4px }}
+  th:nth-child(1) {{ width:62px }} th:nth-child(4), th:nth-child(5) {{ width:40px }} th:nth-child(6) {{ width:60px }}
+  .long {{ display:none }} .short {{ display:inline }}
+  .links a {{ display:block; margin:2px 0 }} }}
+</style></head>
+<body><main>
+<header><div><h1>Patreon-videoer</h1><div class="sub">{summary}</div></div>
+<div class="filters">
+<label><input type="radio" name="f" value="" checked><span>Alle</span></label>
+<label><input type="radio" name="f" value="f-unwatched"><span>Ikke sett</span></label>
+<label><input type="radio" name="f" value="f-unliked"><span>Ikke likt</span></label>
+{refresh}</div></header>
+{content}
+<footer>Oppdatert {updated}. «Sett» kommer fra Plex. Likerklikk sjekkes hver time (sette episoder først), eller med knappen over.</footer>
+</main>
+<script>
+document.querySelectorAll('.filters input').forEach(i => i.addEventListener('change', () => {{
+  document.body.className = i.value; try {{ localStorage.setItem('f', i.value) }} catch (e) {{}}
+}}));
+try {{ const f = localStorage.getItem('f'); if (f) {{ const i = document.querySelector(`.filters input[value="${{f}}"]`);
+  if (i) {{ i.checked = true; document.body.className = f }} }} }} catch (e) {{}}
+</script>
+</body></html>
+"""
+
+
+def serve(cfg: Config, port: int) -> ThreadingHTTPServer:
+    index = Index(cfg)
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code: int, body: str = "", ctype: str = "text/html; charset=utf-8", headers=()):
+            data = body.encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in headers:
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if self.path in ("/", "/index.html"):
+                try:
+                    self._send(200, render(index))
+                except Exception as e:
+                    log.exception("Rendering index failed")
+                    self._send(500, f"<p>Kunne ikke lage siden: {_e(e)}</p>")
+            elif self.path == "/health":
+                self._send(200, "ok", "text/plain")
+            else:
+                self._send(404, "Not found", "text/plain")
+
+        def do_POST(self):
+            if self.path == "/refresh":
+                index.refresh_likes()
+                self._send(303, headers=[("Location", "./")])
+            else:
+                self._send(404, "Not found", "text/plain")
+
+        def log_message(self, fmt, *args):
+            log.debug("web: " + fmt, *args)
+
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    log.info("Index page on port %d", port)
+    return server

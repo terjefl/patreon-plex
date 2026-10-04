@@ -48,7 +48,7 @@ class Config:
     rate_limit: str | None = None
     pause_seconds: tuple[int, int] = (0, 0)
     heartbeat_url: str | None = None
-    like_watched: bool = False  # like posts on Patreon once watched in Plex (needs `plex`)
+    web_port: int | None = 8000  # index page (needs `plex`); None to disable
     plex: PlexConfig | None = None
 
     def find_creator(self, slug: str) -> CreatorConfig:

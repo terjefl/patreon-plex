@@ -1,109 +1,95 @@
-"""Like a Patreon post once you have watched its episode in Plex.
+"""Track whether you have liked each downloaded post on Patreon.
 
-The download never plays the video through Patreon's player, so the creator sees no
-sign of you watching. A like, sent only after Plex reports the episode as watched, is
-a real signal without faking playback.
+Patreon rejects likes sent without the web app's CSRF token, so liking stays manual.
+This only reads `current_user_has_liked`, so the index page can list the episodes you
+have watched in Plex but not liked yet.
 """
 
 import json
 import logging
+import os
 import random
+import threading
 import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
-from yt_dlp.networking.exceptions import HTTPError
 
-from .config import Config
+from . import plex
+from .config import Config, CreatorConfig
+from .harvest import Harvester
 
 log = logging.getLogger(__name__)
 
-MAX_LIKES_PER_RUN = 10
-PAUSE_BETWEEN_LIKES = (5, 30)
+# Besides watched-but-not-liked posts (always checked), refresh this many other posts per run.
+BACKGROUND_CHECKS_PER_RUN = 20
+RECHECK_AFTER_DAYS = 7
+PAUSE_BETWEEN_CHECKS = (1.0, 4.0)
+
+_lock = threading.Lock()
 
 
-class LikeRejected(Exception):
-    """Patreon refused the like request itself (not a per-post problem); stop trying."""
+class LikeStore:
+    """data/<creator>/likes.json: {post_id: {"liked": bool, "checked": epoch}}"""
+
+    def __init__(self, cfg: Config, creator: CreatorConfig):
+        self.path = cfg.data_dir / creator.creator / "likes.json"
+
+    def load(self) -> dict[str, dict]:
+        try:
+            return json.loads(self.path.read_text())
+        except FileNotFoundError:
+            return {}
+
+    def update(self, post_id: str, liked: bool) -> None:
+        with _lock:
+            data = self.load()
+            data[post_id] = {"liked": liked, "checked": int(time.time())}
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=1))
+            os.replace(tmp, self.path)
 
 
-def watched_files(cfg: Config) -> set[Path]:
-    """Library paths (as this container sees them) of episodes Plex marks as watched."""
-    plex = cfg.plex
-    query = urllib.parse.urlencode({"X-Plex-Token": plex.token})
-    req = urllib.request.Request(
-        f"{plex.url.rstrip('/')}/library/sections/{plex.section_id}/allLeaves?{query}",
-        headers={"Accept": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        items = json.loads(resp.read())["MediaContainer"].get("Metadata", [])
-    plex_root = plex.library_path.rstrip("/")
-    files: set[Path] = set()
-    for item in items:
-        if not item.get("viewCount"):
-            continue
-        for media in item.get("Media", []):
-            for part in media.get("Part", []):
-                path = part.get("file", "")
-                if path.startswith(plex_root + "/"):
-                    files.add(cfg.library_dir / path[len(plex_root) + 1 :])
-    return files
+def post_files(state_posts: dict[str, dict]) -> dict[Path, str]:
+    """Library file path -> post id, for downloaded posts."""
+    return {Path(f): pid for pid, p in state_posts.items() if p.get("status") == "done" for f in p.get("files", [])}
 
 
-def _has_liked(ydl: YoutubeDL, post_id: str) -> bool:
+def has_liked(ydl: YoutubeDL, post_id: str) -> bool:
     url = f"https://www.patreon.com/api/posts/{post_id}?fields[post]=current_user_has_liked&json-api-version=1.0"
     data = json.loads(ydl.urlopen(Request(url)).read())
     return bool(data["data"]["attributes"].get("current_user_has_liked"))
 
 
-def like(ydl: YoutubeDL, post_id: str) -> None:
-    req = Request(
-        f"https://www.patreon.com/api/posts/{post_id}/likes?json-api-version=1.0",
-        data=b"{}",
-        headers={"Content-Type": "application/vnd.api+json"},
-        method="POST",
-    )
-    try:
-        ydl.urlopen(req).read()
-    except HTTPError as e:
-        if e.status in (401, 403, 405):
-            raise LikeRejected(f"Patreon returned HTTP {e.status} for the like request") from e
-        raise
+def check_likes(cfg: Config, creator: CreatorConfig, only_watched: bool = False) -> int:
+    """Refresh like status: all watched-but-not-liked posts, plus a few stale/unknown ones."""
+    h = Harvester(cfg, creator, dry_run=True)
+    h.refresh_cookies()
+    store = LikeStore(cfg, creator)
+    known = store.load()
+    by_file = post_files(h.state.posts)
+    watched = {by_file[e.path] for e in plex.episodes(cfg) if e.watched and e.path in by_file}
 
+    urgent = [pid for pid in watched if not known.get(pid, {}).get("liked")]
+    stale_before = time.time() - RECHECK_AFTER_DAYS * 86400
+    background = []
+    if not only_watched:
+        others = [pid for pid in set(by_file.values()) - set(urgent) if known.get(pid, {}).get("checked", 0) < stale_before]
+        others.sort(key=lambda pid: known.get(pid, {}).get("checked", 0))
+        background = others[:BACKGROUND_CHECKS_PER_RUN]
 
-def like_watched(harvester, dry_run: bool = False) -> list[str]:
-    """Like every downloaded post whose episode is watched in Plex and not yet liked."""
-    state = harvester.state
-    watched = watched_files(harvester.cfg)
-    todo = []
-    for post_id, post in state.posts.items():
-        if post.get("status") != "done" or post.get("liked"):
-            continue
-        if any(Path(f) in watched for f in post.get("files", [])):
-            todo.append(post_id)
-    if not todo:
-        return []
-    log.info("%s: %d watched post(s) not liked yet", harvester.creator_name, len(todo))
-
-    liked: list[str] = []
-    with YoutubeDL(harvester._params()) as ydl:
-        for i, post_id in enumerate(todo[:MAX_LIKES_PER_RUN]):
+    checked = 0
+    with YoutubeDL(h._params()) as ydl:
+        for i, pid in enumerate(urgent + background):
             if i:
-                time.sleep(random.uniform(*PAUSE_BETWEEN_LIKES))
-            title = state.posts[post_id].get("title")
-            if _has_liked(ydl, post_id):
-                log.info("Already liked %s: %s", post_id, title)
-            elif dry_run:
-                log.info("Would like %s: %s", post_id, title)
-                continue
-            else:
-                like(ydl, post_id)
-                if not _has_liked(ydl, post_id):
-                    raise LikeRejected(f"like for {post_id} was accepted but did not stick")
-                log.info("Liked %s: %s", post_id, title)
-                liked.append(post_id)
-            state.posts[post_id]["liked"] = True
-            state.save()
-    return liked
+                time.sleep(random.uniform(*PAUSE_BETWEEN_CHECKS))
+            try:
+                store.update(pid, has_liked(ydl, pid))
+                checked += 1
+            except Exception as e:
+                log.warning("Could not check like status for %s: %s", pid, e)
+    if checked:
+        log.info("%s: checked like status for %d post(s)", h.creator_name, checked)
+    return checked

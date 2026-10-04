@@ -3,6 +3,8 @@ services:
     image: ghcr.io/terjefl/patreon-plex:latest
     container_name: patreon-plex
     restart: unless-stopped
+    ports:
+      - "8400:8000"   # index page
     environment:
       - TZ=Europe/Oslo
     volumes:

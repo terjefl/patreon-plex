@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import Config, load_config
 from .harvest import Harvester, LoginExpired, heartbeat, refresh_plex
-from .likes import LikeRejected, like, like_watched
+from .likes import check_likes
 
 log = logging.getLogger("patreon_plex")
 
@@ -29,14 +29,11 @@ def run_once(cfg: Config) -> bool:
         downloaded += len(result.downloaded)
         failed += len(result.failed)
         pending += result.pending
-        if cfg.like_watched and cfg.plex:
+        if cfg.plex:
             try:
-                like_watched(harvester)
-            except LikeRejected as e:
-                log.error("Liking stopped: %s", e)
-                errors.append(f"likes: {e}")
-            except Exception as e:  # likes are a nicety; never fail the run over them
-                log.warning("Liking watched posts failed: %s", e)
+                check_likes(cfg, creator)
+            except Exception as e:  # like status is a nicety; never fail the run over it
+                log.warning("Checking like status failed: %s", e)
     if downloaded:
         refresh_plex(cfg)
     msg = f"{downloaded} downloaded, {failed} failed, {pending} pending"
@@ -57,10 +54,7 @@ def main() -> None:
     p_plan.add_argument("-n", type=int, default=20)
     p_plan.add_argument("--creator", help="only this creator (slug)")
     sub.add_parser("refresh-art", help="rewrite show titles, posters and backgrounds")
-    p_likes = sub.add_parser("likes", help="like posts whose episodes are watched in Plex")
-    p_likes.add_argument("--dry-run", action="store_true", help="only show what would be liked")
-    p_like = sub.add_parser("like", help="like one post (to test that liking works)")
-    p_like.add_argument("post_id")
+    sub.add_parser("likes", help="refresh which posts you have liked on Patreon")
     sub.add_parser("run", help="download new posts once")
     sub.add_parser("loop", help="download new posts every interval_minutes")
     args = parser.parse_args()
@@ -91,23 +85,14 @@ def main() -> None:
         if not cfg.plex:
             raise SystemExit("likes needs a `plex` section with url, token and section_id")
         for creator in cfg.creators:
-            h = Harvester(cfg, creator, dry_run=args.dry_run)
-            h.refresh_cookies()
-            print(f"{creator.creator}: liked {len(like_watched(h, dry_run=args.dry_run))}")
-    elif args.command == "like":
-        h = Harvester(cfg, cfg.creators[0], dry_run=True)
-        h.refresh_cookies()
-        from yt_dlp import YoutubeDL
-
-        with YoutubeDL(h._params()) as ydl:
-            try:
-                like(ydl, args.post_id)
-            except LikeRejected as e:
-                raise SystemExit(f"Rejected: {e}")
-        print(f"Liked {args.post_id}")
+            print(f"{creator.creator}: checked {check_likes(cfg, creator)} post(s)")
     elif args.command == "run":
         raise SystemExit(0 if run_once(cfg) else 1)
     elif args.command == "loop":
+        if cfg.web_port and cfg.plex:
+            from .web import serve
+
+            serve(cfg, cfg.web_port)
         while True:
             run_once(cfg)
             log.info("Sleeping %d minutes", cfg.interval_minutes)

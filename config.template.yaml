@@ -21,10 +21,9 @@ pause_seconds: [60, 180]
 #   section_id: 12
 #   library_path: /Media01/Patreon   # library_dir as Plex sees it
 
-# Like a post on Patreon once its episode is watched in Plex (needs `plex`).
-# Downloads never play through Patreon's player, so this is the creator's only sign
-# that you watch. Test first with the `likes --dry-run` and `like <post id>` commands.
-like_watched: false
+# Index page with every episode, Plex watched status and Patreon likes (needs `plex`).
+# No login of its own: put it behind an authenticating proxy.
+web_port: 8000
 
 creators:
   # Slug from https://www.patreon.com/c/<creator>/posts
