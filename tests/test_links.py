@@ -81,3 +81,12 @@ def test_failed_lookup_is_retried_not_no_media(tmp_path):
 
     with pytest.raises(DownloadError, match="Could not look for video links"):
         harvester(tmp_path)._extract_post(Offline({}), "1")
+
+
+def test_no_media_error_from_ytdlp_is_quiet(caplog):
+    from patreon_plex.harvest import _YtdlpLogger
+
+    caplog.set_level("DEBUG", logger="patreon_plex.harvest")
+    _YtdlpLogger().error("ERROR: [patreon] 1: No supported media found in this post")
+    _YtdlpLogger().error("ERROR: [GoogleDrive] x: HTTP Error 429")
+    assert [r.levelname for r in caplog.records] == ["DEBUG", "ERROR"]

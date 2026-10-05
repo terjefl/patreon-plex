@@ -24,7 +24,12 @@ class ParsedTitle:
     episode_title: str
 
 
+# Notes to patrons that aren't part of the title: "(Link Below)", "(link in description)", "⤵️".
+_NOTE_RE = re.compile(r"\(\s*links?\b[^)]*\)|[⤵⬇👇]\ufe0f?", re.IGNORECASE)
+
+
 def clean(text: str) -> str:
+    text = _NOTE_RE.sub(" ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text.strip(" -–—:|")
 

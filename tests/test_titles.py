@@ -1,6 +1,6 @@
 import pytest
 
-from patreon_plex.titles import parse_title, safe_filename, show_key
+from patreon_plex.titles import clean, parse_title, safe_filename, show_key
 
 
 @pytest.mark.parametrize(
@@ -80,3 +80,20 @@ def test_config_throttle(tmp_path):
     assert cfg.rate_limit == "4M" and cfg.pause_seconds == (60, 180)
     p.write_text("library_dir: /l\ncookies_file: /c\ndata_dir: /d\ncreators:\n  - creator: X\n")
     assert load_config(p).pause_seconds == (0, 0)
+
+
+@pytest.mark.parametrize(
+    "raw, cleaned",
+    [
+        ("Peep Show - S3 E5 - Jurying (Link Below)", "Peep Show - S3 E5 - Jurying"),
+        ("Peep Show - S2 E3 - Local Hero (link in description) ", "Peep Show - S2 E3 - Local Hero"),
+        ("Kevin Bridges - If Facebook Were a Pub ⤵️", "Kevin Bridges - If Facebook Were a Pub"),
+        ("Big Fat Quiz (2016) - PART 1", "Big Fat Quiz (2016) - PART 1"),
+    ],
+)
+def test_clean_drops_link_notes(raw, cleaned):
+    assert clean(raw) == cleaned
+
+
+def test_link_note_not_in_episode_title():
+    assert parse_title("Peep Show - S2 E3 - Local Hero (Link Below)").episode_title == "Local Hero"

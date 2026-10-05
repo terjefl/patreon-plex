@@ -38,6 +38,22 @@ VIDEO_LINK_RE = re.compile(
 )
 
 
+class _YtdlpLogger:
+    """yt-dlp's messages, minus the "no media" error the harvester handles and reports itself."""
+
+    def debug(self, msg: str) -> None:
+        log.debug(msg)
+
+    def info(self, msg: str) -> None:
+        log.info(msg)
+
+    def warning(self, msg: str) -> None:
+        log.warning(msg)
+
+    def error(self, msg: str) -> None:
+        (log.debug if "No supported media" in msg else log.error)(msg)
+
+
 class LoginExpired(Exception):
     pass
 
@@ -74,7 +90,7 @@ class Harvester:
             "retries": 10,
             "fragment_retries": 10,
             "concurrent_fragment_downloads": 4,
-            "logger": log,
+            "logger": _YtdlpLogger(),
             "ratelimit": parse_bytes(self.cfg.rate_limit) if self.cfg.rate_limit else None,
             **extra,
         }
