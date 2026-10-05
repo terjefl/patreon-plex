@@ -3,11 +3,22 @@ import logging
 import time
 from pathlib import Path
 
+from yt_dlp.networking.exceptions import TransportError
+
 from .config import Config, load_config
 from .harvest import Harvester, LoginExpired, heartbeat, refresh_plex
 from .likes import check_likes, mark_liked_watched
 
 log = logging.getLogger("patreon_plex")
+
+
+def _is_network_error(e: BaseException | None) -> bool:
+    """A dropped connection or timeout: the next run will likely work, so a traceback is just noise."""
+    while e is not None:
+        if isinstance(e, (TransportError, ConnectionError, TimeoutError)):
+            return True
+        e = getattr(e, "cause", None) or e.__cause__
+    return False
 
 
 def run_once(cfg: Config) -> bool:
@@ -23,7 +34,10 @@ def run_once(cfg: Config) -> bool:
             heartbeat(cfg.heartbeat_url, False, "Patreon cookie expired - export a new cookies.txt")
             return False
         except Exception as e:
-            log.exception("Run for %s failed", creator.creator)
+            if _is_network_error(e):
+                log.warning("Run for %s failed: %s", creator.creator, e)
+            else:
+                log.exception("Run for %s failed", creator.creator)
             errors.append(f"{creator.creator}: {e}")
             continue
         downloaded += len(result.downloaded)
