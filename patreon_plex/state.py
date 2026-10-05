@@ -29,7 +29,9 @@ class State:
         post = self.posts.get(post_id)
         if not post:
             return False
-        return post["status"] in ("done", "no_media", "no_access") or post.get("attempts", 0) >= max_attempts
+        if post["status"] == "no_media":
+            return bool(post.get("links_checked"))
+        return post["status"] in ("done", "no_access") or post.get("attempts", 0) >= max_attempts
 
     def next_number(self, counter: str, reserved: set[int] = frozenset()) -> int:
         n = self.counters.get(counter, 0) + 1

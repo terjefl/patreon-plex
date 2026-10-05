@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
-from yt_dlp.networking.exceptions import HTTPError
+from yt_dlp.networking.exceptions import HTTPError, RequestError
 from yt_dlp.utils import DownloadError, parse_bytes
 
 from .config import Config, CreatorConfig
@@ -30,6 +30,12 @@ MAX_ATTEMPTS = 5
 STOP_AFTER_KNOWN = 25
 # ...or this many posts in a row older than `since`.
 STOP_AFTER_OLD = 5
+# Hosts whose links in a post's text are taken as the post's video, when it has no embed.
+VIDEO_LINK_RE = re.compile(
+    r"https?://(?:www\.)?(?:drive\.google\.com/(?:file/d/|open\?id=)|dai\.ly/|dailymotion\.com/video/"
+    r"|youtu\.be/|youtube\.com/watch|vimeo\.com/\d)\S*",
+    re.IGNORECASE,
+)
 
 
 class LoginExpired(Exception):
@@ -190,17 +196,20 @@ class Harvester:
                     continue
                 known_streak = 0
                 cached = self.state.posts.get(post_id, {})
-                if limit is None and "published" in cached:
+                # A post marked no_media before its text was searched for links gets a fresh look.
+                if limit is None and "published" in cached and cached.get("status") != "no_media":
                     info = {"id": post_id, "title": cached.get("title"), "timestamp": cached["published"], "stub": True}
                 else:
                     try:
-                        info = ydl.extract_info(f"https://www.patreon.com/posts/{post_id}", download=False, process=False)
+                        info = self._extract_post(ydl, post_id)
                     except DownloadError as e:
                         self._record_error(post_id, str(e))
                         continue
                     if limit is None:
                         post = self.state.posts.setdefault(post_id, {"status": "pending"})
                         post.update(published=info["timestamp"], title=info.get("title"))
+                        if post["status"] == "no_media":
+                            post["status"] = "pending"
                 published = datetime.fromtimestamp(info["timestamp"], tz=UTC).date()
                 if self.creator.since and published < self.creator.since:
                     old_streak += 1
@@ -225,12 +234,50 @@ class Harvester:
         if not info.get("stub"):
             return info
         with YoutubeDL(self._params()) as ydl:
-            return ydl.extract_info(f"https://www.patreon.com/posts/{info['id']}", download=False, process=False)
+            return self._extract_post(ydl, str(info["id"]))
+
+    def _extract_post(self, ydl: YoutubeDL, post_id: str) -> dict:
+        try:
+            return ydl.extract_info(f"https://www.patreon.com/posts/{post_id}", download=False, process=False)
+        except DownloadError as e:
+            if "No supported media" not in str(e):
+                raise
+            # yt-dlp only sees embeds and attached files, and reads the post text from a field
+            # Patreon no longer fills. Many posts are an image with the video linked in the text.
+            try:
+                info = self._linked_post(ydl, post_id)
+            except (RequestError, KeyError, ValueError) as lookup_error:
+                # Not "no media": count it as a failed attempt, so the next run tries again.
+                raise DownloadError(f"Could not look for video links in the post: {lookup_error}") from e
+            if not info:
+                raise
+            return info
+
+    def _linked_post(self, ydl: YoutubeDL, post_id: str) -> dict | None:
+        """A playlist of the video links (Google Drive, Dailymotion, ...) in a post's text, if any."""
+        fields = "title,content_json_string,published_at,url,image"
+        resp = ydl.urlopen(Request(f"https://www.patreon.com/api/posts/{post_id}?fields[post]={fields}"))
+        attrs = json.loads(resp.read())["data"]["attributes"]
+        urls = linked_videos(attrs.get("content_json_string"))
+        if not urls:
+            return None
+        log.info("Post %s links its video: %s", post_id, ", ".join(urls))
+        return {
+            "_type": "playlist",
+            "id": post_id,
+            "title": attrs.get("title"),
+            "timestamp": int(datetime.fromisoformat(attrs["published_at"]).timestamp()),
+            "webpage_url": attrs.get("url"),
+            "thumbnail": (attrs.get("image") or {}).get("large_url"),
+            # url_transparent: the episode title and numbers set in download() win over the host's
+            "entries": [{"_type": "url_transparent", "url": url} for url in urls],
+        }
 
     def _record_error(self, post_id: str, message: str) -> None:
         post = self.state.posts.setdefault(post_id, {"status": "pending"})
         if "No supported media" in message:
             post["status"] = "no_media"
+            post["links_checked"] = True
             log.info("Post %s has no video, skipping", post_id)
         elif "do not have access" in message:
             self.check_login()  # raises LoginExpired if the cookie died mid-run
@@ -418,6 +465,43 @@ def _match_special(table: dict[str, int], title: str) -> tuple[str, int] | None:
         if _special_key(name) == key:
             return name, number
     return None
+
+
+def linked_videos(content_json: str | None) -> list[str]:
+    """Video links in a post's text (Patreon's rich-text JSON), in order, without duplicates."""
+    if not content_json:
+        return []
+    found: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            # A link's shown text may be shortened, so its href wins; bare URLs count too.
+            hrefs = [(m.get("attrs") or {}).get("href") for m in node.get("marks") or []]
+            hrefs = [h for h in hrefs if h]
+            if hrefs:
+                found.extend(hrefs)
+            elif node.get("type") == "text":
+                found.append(node.get("text") or "")
+            for child in node.get("content") or []:
+                walk(child)
+
+    walk(json.loads(content_json))
+    urls: dict[str, str] = {}
+    for text in found:
+        for m in VIDEO_LINK_RE.finditer(text):
+            url = m.group(0).rstrip(".,)")
+            urls.setdefault(_link_key(url), url)
+    return list(urls.values())
+
+
+def _link_key(url: str) -> str:
+    """The same video, whether linked as ".../view?usp=sharing", ".../view" or "open?id=..."."""
+    drive = re.search(r"drive\.google\.com/(?:file/d/|open\?id=)([\w-]+)", url)
+    if drive:
+        return "drive:" + drive.group(1)
+    if "youtube.com/watch" in url:
+        return url
+    return re.sub(r"^https?://(?:www\.)?|[?#].*$", "", url).rstrip("/")
 
 
 def _post_id(entry: dict) -> str:
