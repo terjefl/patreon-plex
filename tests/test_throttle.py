@@ -43,3 +43,9 @@ def test_linked_hosts():
                         {"_type": "url_transparent", "url": "https://dai.ly/k1"}]}
     assert _linked_hosts(info) == {"drive.google.com", "dailymotion.com"}
     assert _linked_hosts({"id": "1"}) == set()
+
+
+def test_embedded_drive_video_counts_as_drive():
+    info = {"_type": "url_transparent", "id": "74529766", "url": "https://drive.google.com/file/d/1mlS/view"}
+    assert _linked_hosts(info) == {"drive.google.com"}
+    assert _linked_hosts({"_type": "video", "url": "https://c10.patreonusercontent.com/x.mp4"}) == set()

@@ -520,8 +520,10 @@ def _backoff(n: int) -> float:
 
 
 def _linked_hosts(info: dict) -> set[str]:
-    """Hosts of the videos a post links in its text (empty for videos on Patreon itself)."""
-    urls = [e.get("url", "") for e in info.get("entries") or [] if isinstance(e, dict)]
+    """Hosts of a post's videos that live elsewhere: linked in the text, or embedded (e.g. a
+    Google Drive embed comes back as a url_transparent result). Empty for videos on Patreon."""
+    items = [e for e in info.get("entries") or [] if isinstance(e, dict)] or [info]
+    urls = [e.get("url", "") for e in items if e.get("_type") in ("url", "url_transparent")]
     return {_host(u) for u in urls if u}
 
 
