@@ -127,7 +127,12 @@ def _missing_rows(cfg: Config, creator: CreatorConfig, state: State) -> list[Row
             continue
         if creator.since and datetime.fromtimestamp(post["published"], tz=UTC).date() < creator.since:
             continue
-        if status == "failed":
+        if status == "failed" and post.get("retry_after", 0) > time.time():
+            when = datetime.fromtimestamp(post["retry_after"]).strftime("%d.%m %H:%M")
+            reason = f"Strupet, prøver {when}"
+        elif status == "failed" and post.get("throttled") and not post.get("attempts"):
+            reason = "I kø"  # waited out the throttle; next run tries again
+        elif status == "failed":
             attempts = post.get("attempts", 0)
             reason = "Gitt opp" if attempts >= MAX_ATTEMPTS else f"Feilet ({attempts}/{MAX_ATTEMPTS})"
         else:
@@ -200,7 +205,7 @@ def _row_html(r: Row, show_name: bool = False) -> str:
 
 def _missing_row_html(r: Row, show_name: bool = False) -> str:
     show = f'<span class="show">{_e(r.show)}</span> ' if show_name else ""
-    cls = "queued" if r.missing == "I kø" else "gone"
+    cls = "queued" if r.missing == "I kø" or r.missing.startswith("Strupet") else "gone"
     return (
         f'<tr class="missing"><td class="code">{_e(r.code)}</td>'
         f"<td>{show}{_e(r.title)}</td>"

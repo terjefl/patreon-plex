@@ -36,10 +36,23 @@ VIDEO_LINK_RE = re.compile(
     r"|youtu\.be/|youtube\.com/watch|vimeo\.com/\d)\S*",
     re.IGNORECASE,
 )
+# A host telling us to slow down: rate limited, or Google Drive's per-file download quota.
+THROTTLED_RE = re.compile(r"HTTP Error 429|Too Many Requests|Too many users have viewed or downloaded", re.IGNORECASE)
+# Throttled posts wait this long before the next try, doubling each time up to a day. They
+# don't use up attempts: the file is fine, the host just wants us to come back later.
+THROTTLE_WAIT = 30 * 60
+THROTTLE_WAIT_MAX = 24 * 3600
 
 
 class _YtdlpLogger:
-    """yt-dlp's messages, minus the "no media" error the harvester handles and reports itself."""
+    """yt-dlp's messages, minus the "no media" error the harvester handles and reports itself.
+
+    Remembers whether the host throttled us: Google Drive's quota only shows as a warning,
+    after which yt-dlp downloads the error page and fails on it with "Invalid data".
+    """
+
+    def __init__(self):
+        self.throttled = False
 
     def debug(self, msg: str) -> None:
         log.debug(msg)
@@ -48,9 +61,11 @@ class _YtdlpLogger:
         log.info(msg)
 
     def warning(self, msg: str) -> None:
+        self.throttled |= bool(THROTTLED_RE.search(msg))
         log.warning(msg)
 
     def error(self, msg: str) -> None:
+        self.throttled |= bool(THROTTLED_RE.search(msg))
         (log.debug if "No supported media" in msg else log.error)(msg)
 
 
@@ -81,6 +96,7 @@ class Harvester:
             self.state.save = lambda: None
         self.creator_name = creator.creator_name or creator.creator
         self.creator_avatar: str | None = None
+        self.ytdlp_logger = _YtdlpLogger()
 
     def _params(self, **extra) -> dict:
         return {
@@ -90,7 +106,9 @@ class Harvester:
             "retries": 10,
             "fragment_retries": 10,
             "concurrent_fragment_downloads": 4,
-            "logger": _YtdlpLogger(),
+            "logger": self.ytdlp_logger,
+            # Back off between yt-dlp's own retries instead of hammering a host that said no
+            "retry_sleep_functions": {"http": _backoff, "fragment": _backoff},
             "ratelimit": parse_bytes(self.cfg.rate_limit) if self.cfg.rate_limit else None,
             **extra,
         }
@@ -212,6 +230,8 @@ class Harvester:
                     continue
                 known_streak = 0
                 cached = self.state.posts.get(post_id, {})
+                if limit is None and cached.get("retry_after", 0) > time.time():
+                    continue
                 # A post marked no_media before its text was searched for links gets a fresh look.
                 if limit is None and "published" in cached and cached.get("status") != "no_media":
                     info = {"id": post_id, "title": cached.get("title"), "timestamp": cached["published"], "stub": True}
@@ -289,9 +309,20 @@ class Harvester:
             "entries": [{"_type": "url_transparent", "url": url} for url in urls],
         }
 
-    def _record_error(self, post_id: str, message: str) -> None:
+    def _record_error(self, post_id: str, message: str, throttled: bool = False) -> None:
         post = self.state.posts.setdefault(post_id, {"status": "pending"})
-        if "No supported media" in message:
+        if throttled or THROTTLED_RE.search(message):
+            post["status"] = "failed"
+            post["throttled"] = post.get("throttled", 0) + 1
+            wait = min(THROTTLE_WAIT * 2 ** (post["throttled"] - 1), THROTTLE_WAIT_MAX)
+            post["retry_after"] = int(time.time() + wait)
+            post["error"] = message[-500:]
+            log.warning(
+                "Post %s: the host is throttling us, trying again after %s",
+                post_id,
+                datetime.fromtimestamp(post["retry_after"]).strftime("%d.%m %H:%M"),
+            )
+        elif "No supported media" in message:
             post["status"] = "no_media"
             post["links_checked"] = True
             log.info("Post %s has no video, skipping", post_id)
@@ -444,27 +475,59 @@ class Harvester:
             result.pending = len(candidates) - max_dl
             candidates = candidates[:max_dl]
         log.info("%s: %d new post(s) to download", self.creator_name, len(candidates))
+        throttled_hosts: set[str] = set()
         for i, info in enumerate(candidates):
             if i:
                 self._pause()
             post_id = str(info["id"])
             post_title = info.get("title")  # download() rewrites info["title"] to the episode title
-            log.info("Downloading %s: %s", post_id, post_title)
+            hosts: set[str] = set()
+            self.ytdlp_logger.throttled = False
             try:
-                files = self.download(self.extract(info))
+                info = self.extract(info)
+                hosts = _linked_hosts(info)
+                if hosts & throttled_hosts:
+                    # Asking again while throttled only makes it worse; wait for the next run.
+                    log.info("Skipping %s for now: %s is throttling us", post_id, ", ".join(hosts & throttled_hosts))
+                    result.pending += 1
+                    continue
+                log.info("Downloading %s: %s", post_id, post_title)
+                files = self.download(info)
             except DownloadError as e:
-                self._record_error(post_id, str(e))
-                result.failed.append(post_id)
+                throttled = self.ytdlp_logger.throttled or bool(THROTTLED_RE.search(str(e)))
+                self._record_error(post_id, str(e), throttled=throttled)
+                if throttled:
+                    throttled_hosts |= hosts
+                    result.pending += 1
+                else:
+                    result.failed.append(post_id)
                 continue
             post = self.state.posts.setdefault(post_id, {})
             post.update(status="done", title=post_title, files=[str(f) for f in files])
-            post.pop("error", None)
+            for key in ("error", "retry_after", "throttled"):
+                post.pop(key, None)
             self.state.save()
             result.downloaded.append(post_id)
             log.info("Saved %s", ", ".join(f.name for f in files))
         self.state.save()
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
         return result
+
+
+def _backoff(n: int) -> float:
+    """Seconds before yt-dlp's retry number n: 2, 4, 8 ... up to two minutes."""
+    return min(2.0 ** (n + 1), 120.0)
+
+
+def _linked_hosts(info: dict) -> set[str]:
+    """Hosts of the videos a post links in its text (empty for videos on Patreon itself)."""
+    urls = [e.get("url", "") for e in info.get("entries") or [] if isinstance(e, dict)]
+    return {_host(u) for u in urls if u}
+
+
+def _host(url: str) -> str:
+    host = urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
+    return {"dai.ly": "dailymotion.com", "youtu.be": "youtube.com"}.get(host, host)
 
 
 def _special_key(title: str) -> str:
