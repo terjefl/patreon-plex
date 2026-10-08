@@ -349,7 +349,7 @@ class Harvester:
         preview = self._fetch_thumbnail(info)
         self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, preview)
 
-        entries = list(info["entries"]) if info.get("_type") == "playlist" else [info]
+        entries = _video_entries(info)
         files: list[Path] = []
         for i, entry in enumerate(entries, start=1):
             basename = ep.basename(part=i if len(entries) > 1 else None)
@@ -583,6 +583,20 @@ def _link_key(url: str) -> str:
     if "youtube.com/watch" in url:
         return url
     return re.sub(r"^https?://(?:www\.)?|[?#].*$", "", url).rstrip("/")
+
+
+def _video_entries(info: dict) -> list[dict]:
+    """The videos to download for a post.
+
+    A post can carry both Patreon's own copy (an entry with formats) and an embed of the
+    same video elsewhere (a url entry, e.g. a private Dailymotion link that refuses us).
+    Patreon's copy wins; embeds are only used when the post has nothing else.
+    """
+    if info.get("_type") != "playlist":
+        return [info]
+    entries = list(info["entries"])
+    native = [e for e in entries if e.get("formats")]
+    return native or entries
 
 
 def _post_id(entry: dict) -> str:

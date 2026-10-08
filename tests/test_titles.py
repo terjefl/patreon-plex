@@ -97,3 +97,13 @@ def test_clean_drops_link_notes(raw, cleaned):
 
 def test_link_note_not_in_episode_title():
     assert parse_title("Peep Show - S2 E3 - Local Hero (Link Below)").episode_title == "Local Hero"
+
+
+def test_video_entries_prefers_patreon_copy():
+    from patreon_plex.harvest import _video_entries
+
+    embed = {"_type": "url", "url": "https://dai.ly/k7plojWDtkI8knBgoss"}
+    native = {"id": "1", "formats": [{"url": "https://stream.mux.com/x.m3u8"}]}
+    assert _video_entries({"_type": "playlist", "entries": iter([embed, native])}) == [native]
+    assert _video_entries({"_type": "playlist", "entries": [embed]}) == [embed]
+    assert _video_entries(native) == [native]
