@@ -53,3 +53,7 @@ creators:
     #   Only Fools And Horses:
     #     Dates: 8
     #     The Jolly Boys' Outing: 9
+    # Title to file a post by, per post id, when its own title can't say where it belongs
+    # (checked against the official lists, e.g. on TVmaze). Run `mandy refile --all` after.
+    title_overrides: {}
+    #   "83877577": "Travel Man - S2 E3 - Copenhagen (Noel Fielding)"
