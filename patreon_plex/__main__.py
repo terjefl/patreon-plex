@@ -69,7 +69,10 @@ def main() -> None:
     p_plan.add_argument("-n", type=int, default=20)
     p_plan.add_argument("--creator", help="only this creator (slug)")
     sub.add_parser("refresh-art", help="rewrite show titles, posters and backgrounds")
-    sub.add_parser("refresh-plots", help="fill empty episode descriptions from the posts, clean the rest")
+    p_plots = sub.add_parser("refresh-plots", help="fill empty episode descriptions from the posts, clean the rest")
+    p_plots.add_argument(
+        "--remove-orphans", action="store_true", help="also delete .nfo/.jpg left without a video by failed downloads"
+    )
     p_likes = sub.add_parser("likes", help="refresh which posts you have liked on Patreon")
     p_likes.add_argument("--all", action="store_true", help="check every downloaded post now")
     p_likes.add_argument("--mark-watched", action="store_true", help="then mark liked episodes as watched in Plex")
@@ -101,7 +104,10 @@ def main() -> None:
             print(f"{creator.creator}: {Harvester(cfg, creator).refresh_show_art()} show(s) refreshed")
     elif args.command == "refresh-plots":
         for creator in cfg.creators:
-            print(f"{creator.creator}: {Harvester(cfg, creator).refresh_plots()} description(s) updated")
+            harvester = Harvester(cfg, creator)
+            if args.remove_orphans:
+                print(f"{creator.creator}: {len(harvester.remove_orphans())} leftover file(s) removed")
+            print(f"{creator.creator}: {harvester.refresh_plots()} description(s) updated")
     elif args.command == "likes":
         if not cfg.plex:
             raise SystemExit("likes needs a `plex` section with url, token and section_id")

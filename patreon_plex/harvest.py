@@ -40,6 +40,9 @@ VIDEO_LINK_RE = re.compile(
 )
 # A host telling us to slow down: rate limited, or Google Drive's per-file download quota.
 THROTTLED_RE = re.compile(r"HTTP Error 429|Too Many Requests|Too many users have viewed or downloaded", re.IGNORECASE)
+# Sidecars this recent may belong to a download still in progress; leave them alone.
+ORPHAN_MIN_AGE = 12 * 3600
+VIDEO_SUFFIXES = (".mp4", ".mkv", ".webm", ".m4v", ".mov")
 # Throttled posts wait this long before the next try, doubling each time up to a day. They
 # don't use up attempts: the file is fine, the host just wants us to come back later.
 THROTTLE_WAIT = 30 * 60
@@ -368,42 +371,57 @@ class Harvester:
 
         entries = _video_entries(info)
         files: list[Path] = []
-        for i, entry in enumerate(entries, start=1):
-            basename = ep.basename(part=i if len(entries) > 1 else None)
-            if (season_dir / f"{basename}.mp4").exists():
-                basename += f" ({ep.post_id})"
-            nfo = season_dir / f"{basename}.nfo"
-            write_episode_nfo(nfo, ep)
-            entry.update(
-                title=ep.display_title,
-                description=ep.description,
-                show=ep.show_title,
-                series=ep.show_title,
-                season_number=ep.season,
-                episode_number=ep.episode,
-                artist=self.creator_name,
-            )
-            params = self._params(
-                paths={"home": str(season_dir), "temp": str(self.tmp_dir)},
-                outtmpl={"default": f"{basename}.%(ext)s"},
-                format="bv*+ba/b",
-                merge_output_format="mp4",
-                writethumbnail=True,
-                postprocessors=[
-                    {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
-                    {"key": "FFmpegMetadata", "add_metadata": True},
-                    {"key": "EmbedThumbnail", "already_have_thumbnail": True},
-                ],
-            )
-            with YoutubeDL(params) as ydl:
-                result = ydl.process_ie_result(entry, download=True)
-            path = Path(result["requested_downloads"][0]["filepath"])
-            if path.with_suffix(".nfo") != nfo:
-                nfo.replace(path.with_suffix(".nfo"))
-            files.append(path)
+        written: list[Path] = []  # this attempt's files, removed again if it fails
+        try:
+            for i, entry in enumerate(entries, start=1):
+                files.append(self._download_part(entry, ep, season_dir, i if len(entries) > 1 else None, written))
+        except BaseException:
+            # A failed attempt would leave sidecars without a video (and, for a post in parts,
+            # finished parts the retry would duplicate). The retry starts from scratch.
+            for path in written:
+                path.unlink(missing_ok=True)
+            raise
         if preview:
             preview.unlink(missing_ok=True)
         return files
+
+    def _download_part(self, entry: dict, ep: Episode, season_dir: Path, part: int | None, written: list) -> Path:
+        basename = ep.basename(part=part)
+        if (season_dir / f"{basename}.mp4").exists():
+            basename += f" ({ep.post_id})"
+        stem = season_dir / basename
+        written += [stem.with_suffix(".nfo"), stem.with_suffix(".jpg"), stem.with_suffix(".mp4")]
+        nfo = season_dir / f"{basename}.nfo"
+        write_episode_nfo(nfo, ep)
+        entry.update(
+            title=ep.display_title,
+            description=ep.description,
+            show=ep.show_title,
+            series=ep.show_title,
+            season_number=ep.season,
+            episode_number=ep.episode,
+            artist=self.creator_name,
+        )
+        params = self._params(
+            paths={"home": str(season_dir), "temp": str(self.tmp_dir)},
+            outtmpl={"default": f"{basename}.%(ext)s"},
+            format="bv*+ba/b",
+            merge_output_format="mp4",
+            writethumbnail=True,
+            postprocessors=[
+                {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+                {"key": "FFmpegMetadata", "add_metadata": True},
+                {"key": "EmbedThumbnail", "already_have_thumbnail": True},
+            ],
+        )
+        with YoutubeDL(params) as ydl:
+            result = ydl.process_ie_result(entry, download=True)
+        path = Path(result["requested_downloads"][0]["filepath"])
+        written.append(path)
+        if path.with_suffix(".nfo") != nfo:
+            written.append(path.with_suffix(".nfo"))
+            nfo.replace(path.with_suffix(".nfo"))
+        return path
 
     def _fetch_thumbnail(self, info: dict) -> Path | None:
         """The post's thumbnail as a local JPEG, for show artwork made before the download."""
@@ -504,6 +522,24 @@ class Harvester:
                 if file in keys:
                     plex.refresh_metadata(self.cfg, keys[file])
         return len(changed)
+
+    def remove_orphans(self) -> list[Path]:
+        """Delete episode .nfo/.jpg sidecars with no video next to them, left by failed
+        downloads before failed attempts cleaned up after themselves. Never touches videos."""
+        if not self.library_dir.exists():
+            return []
+        removed = []
+        for nfo in sorted(self.library_dir.glob("*/*/*.nfo")):
+            if any(nfo.with_suffix(s).exists() for s in VIDEO_SUFFIXES):
+                continue
+            if time.time() - nfo.stat().st_mtime < ORPHAN_MIN_AGE:
+                continue
+            for sidecar in (nfo, nfo.with_suffix(".jpg")):
+                if sidecar.exists():
+                    sidecar.unlink()
+                    removed.append(sidecar)
+                    log.info("Removed leftover %s", sidecar.name)
+        return removed
 
     # ---- orchestration -----------------------------------------------------
 
