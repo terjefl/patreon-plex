@@ -254,6 +254,38 @@ def render(index: Index) -> str:
             f"<table>{head}<tbody>{body}</tbody></table></details>"
         )
 
+    return _page(index, "shows", "".join(parts), rows, missing, filters=("", "f-unwatched", "f-unliked", "f-missing"))
+
+
+_MONTHS = "januar februar mars april mai juni juli august september oktober november desember".split()
+
+
+def render_chrono(index: Index) -> str:
+    """Every episode across all shows, newest first, grouped by month."""
+    rows = [r for r in index.rows() if not r.missing]
+    newest_first = sorted(rows, key=lambda r: (r.aired, int(r.rating_key or 0)), reverse=True)
+    months: dict[str, list[Row]] = {}
+    for r in newest_first:
+        months.setdefault(r.aired[:7], []).append(r)
+    head = "<thead><tr><th>Ep.</th><th>Tittel</th><th>Dato</th><th>Sett</th><th>Likt</th><th></th></tr></thead>"
+    parts = []
+    for month, eps in months.items():
+        label = f"{_MONTHS[int(month[5:7]) - 1].capitalize()} {month[:4]}" if len(month) == 7 else "Ukjent dato"
+        unseen = sum(not r.watched for r in eps)
+        body = "".join(_row_html(r, show_name=True) for r in eps)
+        parts.append(
+            f"<details open><summary><h2>{_e(label)}</h2>"
+            f'<span class="meta">{len(eps)} ep · {unseen} ikke sett</span></summary>'
+            f"<table>{head}<tbody>{body}</tbody></table></details>"
+        )
+    return _page(index, "chrono", "".join(parts), rows, [], filters=("f-unwatched", "", "f-unliked"))
+
+
+_FILTER_LABELS = {"": "Alle", "f-unwatched": "Ikke sett", "f-unliked": "Ikke likt", "f-missing": "Mangler"}
+
+
+def _page(index: Index, page: str, content: str, rows: list[Row], missing: list[Row], filters: tuple) -> str:
+    """The page around `content`. The first filter is the page's default."""
     watched = sum(r.watched for r in rows)
     liked = sum(r.liked is True for r in rows)
     refresh = (
@@ -261,11 +293,23 @@ def render(index: Index) -> str:
         if index.refreshing
         else '<form method="post" action="refresh"><button>Sjekk likerklikk nå</button></form>'
     )
+    radios = "".join(
+        f'<label><input type="radio" name="f" value="{f}"{" checked" if f == filters[0] else ""}>'
+        f"<span>{label}</span></label>"
+        for f, label in _FILTER_LABELS.items()
+        if f in filters
+    )
+    views = (("shows", "./", "Per serie"), ("chrono", "kronologisk", "Kronologisk"))
+    nav = "".join(f'<a href="{href}" class="{"on" if key == page else ""}">{label}</a>' for key, href, label in views)
     return PAGE.format(
+        page=page,
+        nav=nav,
+        filters=radios,
+        default=filters[0],
         summary=f"{len(rows)} episoder · {watched} sett · {liked} likt"
         + (f" · {len(missing)} mangler" if missing else ""),
         refresh=refresh,
-        content="".join(parts),
+        content=content,
         updated=time.strftime("%d.%m.%Y %H:%M"),
     )
 
@@ -315,7 +359,10 @@ button.b[disabled], .allbtn[disabled] {{ opacity:.5; cursor:wait }}
 .links a:hover {{ text-decoration:underline }}
 body.f-unwatched tbody tr:not(.unwatched), body.f-unliked tbody tr:not(.unliked),
   body.f-missing tbody tr:not(.missing), body.f-missing details:not(:has(tr.missing)),
-  body.f-missing section.todo {{ display:none }}
+  body.f-missing section.todo,
+  body.f-unwatched details:not(:has(tr.unwatched)), body.f-unliked details:not(:has(tr.unliked)) {{ display:none }}
+.views {{ display:flex; gap:14px; margin:2px 0 4px }} .views a {{ color:var(--muted); text-decoration:none }}
+.views a.on {{ color:var(--accent); font-weight:600 }} .views a:hover {{ text-decoration:underline }}
 tr.missing td {{ color:var(--muted) }} tr.missing td:nth-child(2) {{ font-style:italic }}
 .gone {{ color:var(--gone); background:var(--gone-bg) }} .queued {{ color:var(--unk); background:var(--unk-bg) }}
 .why {{ font-size:12px; color:var(--muted); margin-left:8px }}
@@ -325,20 +372,18 @@ footer {{ color:var(--muted); font-size:13px; margin-top:24px }}
   .long {{ display:none }} .short {{ display:inline }}
   .links a {{ display:block; margin:2px 0 }} .why {{ display:none }} }}
 </style></head>
-<body><main>
-<header><div><h1>Patreon-videoer</h1><div class="sub">{summary}</div></div>
+<body class="{default}" data-page="{page}"><main>
+<header><div><h1>Patreon-videoer</h1><nav class="views">{nav}</nav><div class="sub">{summary}</div></div>
 <div class="filters">
-<label><input type="radio" name="f" value="" checked><span>Alle</span></label>
-<label><input type="radio" name="f" value="f-unwatched"><span>Ikke sett</span></label>
-<label><input type="radio" name="f" value="f-unliked"><span>Ikke likt</span></label>
-<label><input type="radio" name="f" value="f-missing"><span>Mangler</span></label>
+{filters}
 {refresh}</div></header>
 {content}
 <footer>Oppdatert {updated}. «Sett» kommer fra Plex. Likerklikk sjekkes hver time (sette episoder først), eller med knappen over. Poster som mangler står i kursiv der episoden skulle vært; hold over merket for å se feilen.</footer>
 </main>
 <script>
+const fKey = document.body.dataset.page + ':f';
 document.querySelectorAll('.filters input').forEach(i => i.addEventListener('change', () => {{
-  document.body.className = i.value; try {{ localStorage.setItem('f', i.value) }} catch (e) {{}}
+  document.body.className = i.value; try {{ localStorage.setItem(fKey, i.value) }} catch (e) {{}}
 }}));
 async function setWatched(keys, watched) {{
   const r = await fetch('watched', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
@@ -369,7 +414,7 @@ document.addEventListener('click', async e => {{
   }} catch (err) {{ alert('Klarte ikke å oppdatere Plex: ' + err.message); }}
   b.disabled = false;
 }});
-try {{ const f = localStorage.getItem('f'); if (f) {{ const i = document.querySelector(`.filters input[value="${{f}}"]`);
+try {{ const f = localStorage.getItem(fKey); if (f !== null) {{ const i = document.querySelector(`.filters input[value="${{f}}"]`);
   if (i) {{ i.checked = true; document.body.className = f }} }} }} catch (e) {{}}
 </script>
 </body></html>
@@ -392,9 +437,10 @@ def serve(cfg: Config, port: int) -> ThreadingHTTPServer:
             self.wfile.write(data)
 
         def do_GET(self):
-            if self.path in ("/", "/index.html"):
+            page = {"/": render, "/index.html": render, "/kronologisk": render_chrono}.get(self.path)
+            if page:
                 try:
-                    self._send(200, render(index))
+                    self._send(200, page(index))
                 except Exception as e:
                     log.exception("Rendering index failed")
                     self._send(500, f"<p>Kunne ikke lage siden: {_e(e)}</p>")
