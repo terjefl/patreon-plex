@@ -52,6 +52,19 @@ def write_episode_nfo(path: Path, ep: Episode) -> None:
     _write_xml(root, path)
 
 
+def set_episode_plot(path: Path, plot: str) -> bool:
+    """Replace an episode NFO's description. False if it already had this one."""
+    root = ET.parse(path).getroot()
+    element = root.find("plot")
+    if element is None:
+        element = ET.SubElement(root, "plot")
+    if (element.text or "") == plot:
+        return False
+    element.text = plot
+    _write_xml(root, path)
+    return True
+
+
 def write_show_nfo(path: Path, title: str, plot: str) -> None:
     root = ET.Element("tvshow")
     ET.SubElement(root, "title").text = title

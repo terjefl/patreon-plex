@@ -34,6 +34,25 @@ def clean(text: str) -> str:
     return text.strip(" -–—:|")
 
 
+# Divider runs patrons put between the text and the links: "------", "______", "=====".
+_DIVIDER_RE = re.compile(r"[-_=~*]{4,}")
+# Lines that are nothing but spacers or dividers (a lone "." is a common spacer).
+_SPACER_LINE_RE = re.compile(r"[-_=~*.·•|\s]*")
+
+
+def clean_plot(text: str) -> str:
+    """Post text for an episode description: no divider runs or spacer lines, at most one
+    blank line between paragraphs."""
+    lines: list[str] = []
+    for line in text.splitlines():
+        line = re.sub(r"[ \t]+", " ", _DIVIDER_RE.sub(" ", line)).strip()
+        if line and not _SPACER_LINE_RE.fullmatch(line):
+            lines.append(line)
+        elif lines and lines[-1]:
+            lines.append("")
+    return "\n".join(lines).strip()
+
+
 def parse_title(title: str) -> ParsedTitle | None:
     m = _SE_RE.match(clean(title))
     if not m:

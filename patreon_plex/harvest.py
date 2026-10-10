@@ -7,6 +7,7 @@ import shutil
 import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,11 +18,12 @@ from yt_dlp.networking import Request
 from yt_dlp.networking.exceptions import HTTPError, RequestError
 from yt_dlp.utils import DownloadError, parse_bytes
 
+from . import plex
 from .config import Config, CreatorConfig
-from .library import Episode, write_episode_nfo, write_show_nfo
+from .library import Episode, set_episode_plot, write_episode_nfo, write_show_nfo
 from .poster import make_poster
 from .state import State
-from .titles import clean, parse_title, safe_filename, show_key
+from .titles import clean, clean_plot, parse_title, safe_filename, show_key
 
 log = logging.getLogger(__name__)
 
@@ -141,7 +143,7 @@ class Harvester:
         post_id = str(info["id"])
         title = clean(info.get("title") or "")
         published = datetime.fromtimestamp(info["timestamp"], tz=UTC)
-        description = info.get("description") or ""
+        description = clean_plot(info.get("description") or "")
         post_state = self.state.posts.setdefault(post_id, {"status": "pending"})
 
         def numbered(counter: str, reserved: set[int] = frozenset()) -> int:
@@ -274,7 +276,7 @@ class Harvester:
 
     def _extract_post(self, ydl: YoutubeDL, post_id: str) -> dict:
         try:
-            return ydl.extract_info(f"https://www.patreon.com/posts/{post_id}", download=False, process=False)
+            info = ydl.extract_info(f"https://www.patreon.com/posts/{post_id}", download=False, process=False)
         except DownloadError as e:
             if "No supported media" not in str(e):
                 raise
@@ -288,12 +290,26 @@ class Harvester:
             if not info:
                 raise
             return info
+        if not info.get("description"):
+            # yt-dlp reads the text from a field Patreon has stopped filling for newer posts
+            info["description"] = self._post_description(ydl, post_id)
+        return info
+
+    def _post_attrs(self, ydl: YoutubeDL, post_id: str, fields: str) -> dict:
+        resp = ydl.urlopen(Request(f"https://www.patreon.com/api/posts/{post_id}?fields[post]={fields}"))
+        return json.loads(resp.read())["data"]["attributes"]
+
+    def _post_description(self, ydl: YoutubeDL, post_id: str) -> str:
+        """The post's text, or "" if it can't be fetched: a description is never worth a failure."""
+        try:
+            return post_text(self._post_attrs(ydl, post_id, "content_json_string").get("content_json_string"))
+        except (RequestError, KeyError, ValueError) as e:
+            log.warning("Could not fetch the text of post %s: %s", post_id, e)
+            return ""
 
     def _linked_post(self, ydl: YoutubeDL, post_id: str) -> dict | None:
         """A playlist of the video links (Google Drive, Dailymotion, ...) in a post's text, if any."""
-        fields = "title,content_json_string,published_at,url,image"
-        resp = ydl.urlopen(Request(f"https://www.patreon.com/api/posts/{post_id}?fields[post]={fields}"))
-        attrs = json.loads(resp.read())["data"]["attributes"]
+        attrs = self._post_attrs(ydl, post_id, "title,content_json_string,published_at,url,image")
         urls = linked_videos(attrs.get("content_json_string"))
         if not urls:
             return None
@@ -304,6 +320,7 @@ class Harvester:
             "title": attrs.get("title"),
             "timestamp": int(datetime.fromisoformat(attrs["published_at"]).timestamp()),
             "webpage_url": attrs.get("url"),
+            "description": post_text(attrs.get("content_json_string")),
             "thumbnail": (attrs.get("image") or {}).get("large_url"),
             # url_transparent: the episode title and numbers set in download() win over the host's
             "entries": [{"_type": "url_transparent", "url": url} for url in urls],
@@ -458,6 +475,36 @@ class Harvester:
             count += 1
         return count
 
+    def refresh_plots(self) -> int:
+        """Clean divider lines out of episode descriptions, and fill empty ones from the post
+        text. Only touches .nfo files, so it is safe while the loop is running."""
+        self.refresh_cookies()
+        changed: list[Path] = []
+        texts: dict[str, str] = {}
+        with YoutubeDL(self._params()) as ydl:
+            for post_id, post in list(self.state.posts.items()):
+                if post.get("status") != "done":
+                    continue
+                for file in post.get("files", []):
+                    nfo = Path(file).with_suffix(".nfo")
+                    if not nfo.exists():
+                        continue
+                    plot = clean_plot(ET.parse(nfo).getroot().findtext("plot") or "")
+                    if not plot:
+                        if post_id not in texts:
+                            texts[post_id] = self._post_description(ydl, post_id)
+                            time.sleep(0.5)  # one API call per post; no need to rush Patreon
+                        plot = clean_plot(texts[post_id])
+                    if set_episode_plot(nfo, plot):
+                        changed.append(Path(file))
+                        log.info("Updated description: %s", nfo.name)
+        if changed and self.cfg.plex:
+            keys = {ep.path: ep.rating_key for ep in plex.episodes(self.cfg)}
+            for file in changed:
+                if file in keys:
+                    plex.refresh_metadata(self.cfg, keys[file])
+        return len(changed)
+
     # ---- orchestration -----------------------------------------------------
 
     def run(self) -> RunResult:
@@ -546,6 +593,34 @@ def _match_special(table: dict[str, int], title: str) -> tuple[str, int] | None:
         if _special_key(name) == key:
             return name, number
     return None
+
+
+def post_text(content_json: str | None) -> str:
+    """A post's text (Patreon's rich-text JSON) as plain paragraphs, without its video links."""
+    if not content_json:
+        return ""
+    paragraphs: list[str] = []
+
+    def inline(node: dict) -> str:
+        if node.get("type") == "hardBreak":
+            return "\n"
+        if node.get("type") == "text":
+            hrefs = [(m.get("attrs") or {}).get("href") or "" for m in node.get("marks") or []]
+            if any(VIDEO_LINK_RE.match(h) for h in hrefs):
+                return ""
+            return VIDEO_LINK_RE.sub("", node.get("text") or "")
+        return "".join(inline(c) for c in node.get("content") or [] if isinstance(c, dict))
+
+    def block(node: dict) -> None:
+        if node.get("type") in ("paragraph", "heading"):
+            paragraphs.append(inline(node))
+        else:
+            for child in node.get("content") or []:
+                if isinstance(child, dict):
+                    block(child)
+
+    block(json.loads(content_json))
+    return clean_plot("\n".join(paragraphs))
 
 
 def linked_videos(content_json: str | None) -> list[str]:
