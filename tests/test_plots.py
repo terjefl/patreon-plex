@@ -120,3 +120,34 @@ def test_empty_folder_puts_shows_at_the_library_root(tmp_path):
                  creators=[CreatorConfig(creator="M", creator_name="Mandy Cane Lane")])
     assert Harvester(root, root.creators[0], dry_run=True).library_dir == tmp_path / "lib"
     assert Harvester(sub, sub.creators[0], dry_run=True).library_dir == tmp_path / "lib" / "Mandy Cane Lane"
+
+
+def test_refile_moves_a_post_to_its_proper_show(tmp_path):
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
+
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c.txt", data_dir=tmp_path / "data",
+                 creators=[CreatorConfig(creator="M", creator_name="Mandy Cane Lane", folder="")])
+    old_show = tmp_path / "lib" / "Mandy Cane Lane - (Edit) Peep Show"
+    (old_show / "Season 01").mkdir(parents=True)
+    (old_show / "tvshow.nfo").write_text("x")
+    old = []
+    for part in (1, 2):
+        stem = old_show / "Season 01" / f"Mandy Cane Lane - (Edit) Peep Show - S01E06 - - Funeral - Reaction! - pt{part}"
+        for suffix in (".mp4", ".jpg", ".nfo"):
+            stem.with_suffix(suffix).write_text(suffix)
+        old.append(str(stem.with_suffix(".mp4")))
+    h = Harvester(cfg, cfg.creators[0])
+    h.state.posts["75018496"] = {"status": "done", "title": "(Edit) Peep Show - S1 E6* - Funeral - Reaction!",
+                                 "published": 1669161600, "files": old}
+    h.state.shows.update({"peep show": "Peep Show", "edit peep show": "(Edit) Peep Show"})
+    moves = h.refile("75018496")
+    season = tmp_path / "lib" / "Mandy Cane Lane - Peep Show" / "Season 01"
+    assert [n.name for _, n in moves] == [f"Mandy Cane Lane - Peep Show - S01E06 - Funeral - Reaction! - pt{p}.mp4" for p in (1, 2)]
+    assert all(n.exists() and n.with_suffix(".jpg").exists() for _, n in moves)
+    assert "<title>Funeral - Reaction!</title>" in moves[0][1].with_suffix(".nfo").read_text()
+    assert "<showtitle>Peep Show</showtitle>" in moves[0][1].with_suffix(".nfo").read_text()
+    assert not old_show.exists() and "edit peep show" not in h.state.shows
+    assert h.state.posts["75018496"]["files"] == [str(n) for _, n in moves]
+    assert season.parent.joinpath("tvshow.nfo").exists()
+    assert h.refile("75018496") == []  # already in place

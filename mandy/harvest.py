@@ -471,6 +471,48 @@ class Harvester:
             log.info("Pausing %.0f s before next download", seconds)
             time.sleep(seconds)
 
+    def refile(self, post_id: str) -> list[tuple[Path, Path]]:
+        """Move a downloaded post to where it belongs now, e.g. after a title parsing fix or a new
+        show alias: its videos, thumbnails and .nfo files, and its paths in state.json. A show
+        folder left without videos is removed. Returns (old, new) video paths."""
+        post = self.state.posts.get(post_id) or {}
+        if post.get("status") != "done" or "published" not in post:
+            raise ValueError(f"Post {post_id} isn't a downloaded post with a known date")
+        old_files = [Path(f) for f in post.get("files", [])]
+        ep = self.plan({"id": post_id, "title": post.get("title"), "timestamp": post["published"]})
+        show_dir = self.library_dir / ep.show_folder
+        season_dir = show_dir / ep.season_dir
+        moves = []
+        for i, old in enumerate(old_files, start=1):
+            new = season_dir / (ep.basename(part=i if len(old_files) > 1 else None) + old.suffix)
+            if new != old:
+                moves.append((old, new))
+        if not moves:
+            return []
+        season_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, old_files[0].with_suffix(".jpg"))
+        for old, new in moves:
+            if new.exists():
+                raise FileExistsError(new)
+            # thumbnail first, the video last: Plex should find the new sidecars with it
+            for suffix in (".jpg",):
+                if old.with_suffix(suffix).exists():
+                    old.with_suffix(suffix).rename(new.with_suffix(suffix))
+            write_episode_nfo(new.with_suffix(".nfo"), ep)
+            old.rename(new)
+            old.with_suffix(".nfo").unlink(missing_ok=True)
+            log.info("Moved %s -> %s", old.name, new.relative_to(self.library_dir))
+        post["files"] = [str(dict(moves).get(f, f)) for f in old_files]
+        for old_show in {old.parent.parent for old, _ in moves}:
+            if old_show.exists() and not any(old_show.glob("*/*.mp4")):
+                shutil.rmtree(old_show)
+                log.info("Removed the now empty show %s", old_show.name)
+                # forget its spelling, so a later post can't land in it again
+                self.state.shows = {k: v for k, v in self.state.shows.items()
+                                    if safe_filename(self.creator.show_name_template.format(creator=self.creator_name, show=v)) != old_show.name}
+        self.state.save()
+        return moves
+
     def refresh_show_art(self) -> int:
         """Rewrite tvshow.nfo, poster and background for every show folder in the library."""
         if not self.library_dir.exists():

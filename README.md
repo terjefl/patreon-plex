@@ -43,6 +43,7 @@ Commands (`docker exec mandy mandy --config /config/config.yaml <command>`):
 | `refresh-art` | Rewrite show titles, posters and backgrounds (after changing `show_title_template`) |
 | `likes [--all] [--mark-watched]` | Refresh which posts you have liked on Patreon; optionally mark liked episodes as watched in Plex |
 | `refresh-plots [--remove-orphans]` | Fill empty episode descriptions from the posts and clean the rest; optionally delete sidecars left without a video |
+| `refile <post-id>…` | Move downloaded posts to where their title puts them now (after a parsing fix or a new `show_aliases` entry) |
 | `youtube-stats [--all]` | Update the YouTube list for the statistics page |
 | `run` | Download new posts once |
 | `loop` | Default: `run` every `interval_minutes` |

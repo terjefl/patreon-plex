@@ -77,6 +77,8 @@ def main() -> None:
     p_likes = sub.add_parser("likes", help="refresh which posts you have liked on Patreon")
     p_likes.add_argument("--all", action="store_true", help="check every downloaded post now")
     p_likes.add_argument("--mark-watched", action="store_true", help="then mark liked episodes as watched in Plex")
+    p_refile = sub.add_parser("refile", help="move downloaded posts to where their title puts them now")
+    p_refile.add_argument("post_ids", nargs="+")
     p_yt = sub.add_parser("youtube-stats", help="look up the creators' YouTube videos for the statistics page")
     p_yt.add_argument("--all", action="store_true", help="look up every new video now, not 300 at a time")
     sub.add_parser("run", help="download new posts once")
@@ -118,6 +120,14 @@ def main() -> None:
             print(f"{creator.creator}: checked {check_likes(cfg, creator, all_posts=args.all)} post(s)")
             if args.mark_watched:
                 print(f"{creator.creator}: marked {mark_liked_watched(cfg, creator)} episode(s) as watched")
+    elif args.command == "refile":
+        harvester = Harvester(cfg, cfg.creators[0])
+        moved = [m for post_id in args.post_ids for m in harvester.refile(post_id)]
+        for old, new in moved:
+            print(f"{old.relative_to(harvester.library_dir)}\n  -> {new.relative_to(harvester.library_dir)}")
+        if moved:
+            refresh_plex(cfg)
+        print(f"{len(moved)} file(s) moved")
     elif args.command == "youtube-stats":
         for creator in cfg.creators:
             if creator.youtube_url:

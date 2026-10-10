@@ -9,7 +9,7 @@ _SE_RE = re.compile(
         [\s\-–—:|]*                 # separator
         \bS(?:eason)?\s*(?P<season>\d{1,3})
         \s*[.,x]?\s*
-        E(?:p(?:isode)?)?\s*(?P<episode>\d{1,4})\b
+        E(?:p(?:isode)?)?\s*(?P<episode>\d{1,4})\b\*?   # "E6*": a starred episode is still E6
         [\s\-–—:|.]*                # separator
         (?P<title>.*)$""",
     re.IGNORECASE | re.VERBOSE,
@@ -57,7 +57,8 @@ def parse_title(title: str) -> ParsedTitle | None:
     m = _SE_RE.match(clean(title))
     if not m:
         return None
-    show = clean(m.group("show"))
+    # "(Edit) Peep Show": a note on the post, not part of the show's name
+    show = clean(re.sub(r"^\s*\([^)]*\)\s*", "", m.group("show")))
     if not show:
         return None
     return ParsedTitle(

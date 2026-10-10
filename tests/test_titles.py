@@ -107,3 +107,8 @@ def test_video_entries_prefers_patreon_copy():
     assert _video_entries({"_type": "playlist", "entries": iter([embed, native])}) == [native]
     assert _video_entries({"_type": "playlist", "entries": [embed]}) == [embed]
     assert _video_entries(native) == [native]
+
+
+def test_tag_before_show_and_star_after_episode():
+    p = parse_title("(Edit) Peep Show - S1 E6* - Funeral - Reaction!")
+    assert (p.show, p.season, p.episode, p.episode_title) == ("Peep Show", 1, 6, "Funeral - Reaction!")
