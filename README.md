@@ -39,6 +39,8 @@ Commands (`docker exec patreon-plex patreon-plex --config /config/config.yaml <c
 | `plan -n 20 [--creator SLUG]` | Show how the latest 20 posts would be named, without downloading anything |
 | `refresh-art` | Rewrite show titles, posters and backgrounds (after changing `show_title_template`) |
 | `likes [--all] [--mark-watched]` | Refresh which posts you have liked on Patreon; optionally mark liked episodes as watched in Plex |
+| `refresh-plots [--remove-orphans]` | Fill empty episode descriptions from the posts and clean the rest; optionally delete sidecars left without a video |
+| `youtube-stats [--all]` | Update the creators' YouTube lists for the statistics page |
 | `run` | Download new posts once |
 | `loop` | Default: `run` every `interval_minutes` |
 
@@ -65,6 +67,12 @@ The page has no login of its own; put it behind an authenticating proxy (for exa
 Downloads never play through Patreon's player, so the creator's statistics never show you watching; a like is the signal she does get. Liking can't be automated: Patreon rejects like requests without the web app's CSRF token. Like status is read-only: each run checks every watched-but-not-liked post, plus 20 others not checked in the last week. The page's button re-checks the watched ones on demand. `likes --all` checks every downloaded post at once.
 
 A like means you have seen the episode, often before it was downloaded, so liked episodes are marked as watched in Plex after each run (`likes --all --mark-watched` does it now). Each episode is marked once, so setting one back to unwatched in Plex sticks.
+
+## Statistics page
+
+`/statistikk` (or `/statistikk/<slug>` for another creator) shows how much video the creator has made: hours and videos per month and year on Patreon, and on YouTube when `youtube_url` is set (videos, livestreams and Shorts). It is in English and shows nothing private (no watched or liked status, no Plex links), so it can be made public on its own, e.g. a Cloudflare Access bypass for that one path, and shared with the creator.
+
+The YouTube channel's lists give each video's length but not its date, so dates are looked up once per video and kept in `data/<creator>/youtube.json`. The loop refreshes the list daily and looks up at most 300 new videos at a time; `youtube-stats --all` fills it in one go (about 1–2 seconds per video).
 
 ## Monitoring
 

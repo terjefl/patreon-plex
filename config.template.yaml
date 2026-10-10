@@ -34,6 +34,8 @@ creators:
     # folder: Mandy Cane Lane
     # Plex library for this creator, if not plex.section_id (e.g. one shared with their YouTube).
     # plex_section_id: 18
+    # YouTube channel, for the statistics page (/statistikk): hours of video per month and year.
+    # youtube_url: https://www.youtube.com/@MandyCaneLane
     # Only download posts published on or after this date (omit for the whole archive).
     since: 2026-09-01
     # Cap per run, so a large backlog is spread over several runs (0 = no cap).

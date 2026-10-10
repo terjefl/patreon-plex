@@ -19,6 +19,7 @@ from .config import Config, CreatorConfig
 from .harvest import MAX_ATTEMPTS, Harvester
 from .likes import LikeStore, check_likes, post_files
 from .state import State
+from .stats_page import render_stats
 
 log = logging.getLogger(__name__)
 
@@ -358,7 +359,7 @@ def _page(index: Index, page: str, content: str, rows: list[Row], missing: list[
         f'<label><input type="radio" name="src" value="{v}"{" checked" if not v else ""}><span>{label}</span></label>'
         for v, label in (("", "Alle kilder"), ("src-pt", "Patreon"), ("src-yt", "YouTube"))
     ) if len(by_source) > 1 else ""
-    views = (("shows", "./", "Per serie"), ("chrono", "kronologisk", "Kronologisk"))
+    views = (("shows", "./", "Per serie"), ("chrono", "kronologisk", "Kronologisk"), ("stats", "statistikk", "Statistikk ↗"))
     nav = "".join(f'<a href="{href}" class="{"on" if key == page else ""}">{label}</a>' for key, href, label in views)
     names = [c.creator_name or c.creator for c in index.cfg.creators]
     return PAGE.format(
@@ -494,6 +495,29 @@ applyFilters();
 """
 
 
+def _stats_creator(cfg: Config, path: str) -> CreatorConfig | None:
+    """/statistikk is the (first) creator's page, /statistikk/<slug> any creator's."""
+    path = path.split("?", 1)[0].rstrip("/")
+    if path == "/statistikk":
+        return cfg.creators[0]
+    if path.startswith("/statistikk/"):
+        slug = path.removeprefix("/statistikk/").casefold()
+        return next((c for c in cfg.creators if c.creator.casefold() == slug), None)
+    return None
+
+
+_stats_cache: dict[str, tuple[float, str]] = {}
+
+
+def _cached_stats(cfg: Config, creator: CreatorConfig) -> str:
+    hit = _stats_cache.get(creator.creator)
+    if hit and time.time() - hit[0] < 10 * CACHE_SECONDS:
+        return hit[1]
+    page = render_stats(cfg, creator)
+    _stats_cache[creator.creator] = (time.time(), page)
+    return page
+
+
 def serve(cfg: Config, port: int) -> ThreadingHTTPServer:
     index = Index(cfg)
 
@@ -511,7 +535,14 @@ def serve(cfg: Config, port: int) -> ThreadingHTTPServer:
 
         def do_GET(self):
             page = {"/": render, "/index.html": render, "/kronologisk": render_chrono}.get(self.path)
-            if page:
+            creator = _stats_creator(cfg, self.path)
+            if creator:
+                try:
+                    self._send(200, _cached_stats(cfg, creator))
+                except Exception as e:
+                    log.exception("Rendering statistics failed")
+                    self._send(500, f"<p>Could not make the page: {_e(e)}</p>")
+            elif page:
                 try:
                     self._send(200, page(index))
                 except Exception as e:

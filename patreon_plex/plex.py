@@ -21,6 +21,7 @@ class PlexEpisode:
     watched: bool
     path: Path  # as this container sees it; for other sources, as Plex sees it
     local: bool = True  # under library_path, i.e. one of ours
+    duration: float = 0.0  # seconds
 
 
 def _get(cfg: Config, path: str) -> dict:
@@ -57,6 +58,7 @@ def episodes(cfg: Config, section_id: int | None = None, include_other: bool = F
                         watched=bool(item.get("viewCount")),
                         path=cfg.library_dir / file[len(plex_root) + 1 :] if local else Path(file),
                         local=local,
+                        duration=(item.get("duration") or 0) / 1000,
                     )
                 )
     return result

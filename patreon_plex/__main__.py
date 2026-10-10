@@ -8,6 +8,7 @@ from yt_dlp.networking.exceptions import TransportError
 from .config import Config, load_config
 from .harvest import Harvester, LoginExpired, heartbeat, refresh_plex
 from .likes import check_likes, mark_liked_watched
+from .stats import refresh_youtube, youtube_due
 
 log = logging.getLogger("patreon_plex")
 
@@ -79,6 +80,8 @@ def main() -> None:
     p_likes = sub.add_parser("likes", help="refresh which posts you have liked on Patreon")
     p_likes.add_argument("--all", action="store_true", help="check every downloaded post now")
     p_likes.add_argument("--mark-watched", action="store_true", help="then mark liked episodes as watched in Plex")
+    p_yt = sub.add_parser("youtube-stats", help="look up the creators' YouTube videos for the statistics page")
+    p_yt.add_argument("--all", action="store_true", help="look up every new video now, not 300 at a time")
     sub.add_parser("run", help="download new posts once")
     sub.add_parser("loop", help="download new posts every interval_minutes")
     args = parser.parse_args()
@@ -118,6 +121,11 @@ def main() -> None:
             print(f"{creator.creator}: checked {check_likes(cfg, creator, all_posts=args.all)} post(s)")
             if args.mark_watched:
                 print(f"{creator.creator}: marked {mark_liked_watched(cfg, creator)} episode(s) as watched")
+    elif args.command == "youtube-stats":
+        for creator in cfg.creators:
+            if creator.youtube_url:
+                left = refresh_youtube(cfg, creator, max_new=None if args.all else 300)
+                print(f"{creator.creator}: YouTube list updated, {left} video(s) left to look up")
     elif args.command == "run":
         raise SystemExit(0 if run_once(cfg) else 1)
     elif args.command == "loop":
@@ -127,6 +135,12 @@ def main() -> None:
             serve(cfg, cfg.web_port)
         while True:
             run_once(cfg)
+            for creator in cfg.creators:
+                if youtube_due(cfg, creator):
+                    try:
+                        refresh_youtube(cfg, creator)
+                    except Exception as e:  # statistics are a nicety; never stop the loop over them
+                        log.warning("Updating YouTube statistics for %s failed: %s", creator.creator, e)
             log.info("Sleeping %d minutes", cfg.interval_minutes)
             time.sleep(cfg.interval_minutes * 60)
 

@@ -29,6 +29,8 @@ class CreatorConfig:
     # Plex library holding this creator's folder, when it isn't plex.section_id (e.g. one
     # library per creator, shared with their YouTube downloads)
     plex_section_id: int | None = None
+    # The creator's YouTube channel (e.g. https://www.youtube.com/@MandyCaneLane), for the statistics page
+    youtube_url: str | None = None
 
     @property
     def campaign_url(self) -> str:
