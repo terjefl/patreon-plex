@@ -206,3 +206,20 @@ def test_unofficial_special_on_an_official_number_moves_aside(tmp_path):
     h.state.posts["7"] = {"status": "done", "number": 5, "counter": "special:taskmaster"}
     ep = h.plan({"id": "7", "title": "Taskmaster - 3 Balls On a Hill", "timestamp": 1666000000})
     assert (ep.season, ep.episode) == (0, 7)
+
+
+def test_refile_never_moves_a_show_episode_to_her_own_videos(tmp_path):
+    import pytest
+
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
+
+    creator = CreatorConfig(creator="M", creator_name="Mandy Cane Lane", folder="")
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data", creators=[creator])
+    f = tmp_path / "lib" / "Mandy Cane Lane - Taskmaster" / "Season 20" / "Mandy Cane Lane - Taskmaster - S20E08 - Am I An Idiom.mp4"
+    f.parent.mkdir(parents=True)
+    f.write_text("v")
+    h = Harvester(cfg, creator, dry_run=True)
+    h.state.posts["1"] = {"status": "done", "title": "Am I An Idiom?", "published": 1788000000, "files": [str(f)]}
+    with pytest.raises(ValueError, match="names no show"):
+        h.refile("1", move=False)

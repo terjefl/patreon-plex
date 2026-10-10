@@ -494,6 +494,11 @@ class Harvester:
         if "number" in post and "counter" not in post:
             post["counter"] = self._counter_of(old_files[0])
         ep = self.plan({"id": post_id, "title": post.get("title"), "timestamp": post["published"]})
+        misc = safe_filename(self.creator.misc_show_name.format(creator=self.creator_name))
+        if ep.show_folder == misc and old_files[0].parent.parent.name != misc:
+            # The title kept in state has lost the show (e.g. "Am I An Idiom?" for a Taskmaster
+            # episode); where the file is says more than that title does.
+            raise ValueError(f"its saved title {post.get('title')!r} names no show; leaving it in {old_files[0].parent.parent.name}")
         show_dir = self.library_dir / ep.show_folder
         season_dir = show_dir / ep.season_dir
         moves = []
