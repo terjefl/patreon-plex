@@ -191,3 +191,18 @@ def test_post_moving_to_specials_gets_a_number_of_its_own(tmp_path):
     h.state.shows["the office"] = "The Office"
     ep = h.plan({"id": "9", "title": "The Office - Deleted Scenes", "timestamp": 1704844800})
     assert (ep.season, ep.episode) == (0, 4)  # not S00E03, which is taken
+
+
+def test_unofficial_special_on_an_official_number_moves_aside(tmp_path):
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
+
+    creator = CreatorConfig(creator="M", creator_name="Mandy Cane Lane", folder="",
+                            specials={"Taskmaster": {"New Year Treat 2025": 5}})
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data", creators=[creator])
+    h = Harvester(cfg, creator, dry_run=True)
+    h.state.shows["taskmaster"] = "Taskmaster"
+    h.state.counters["special:taskmaster"] = 6
+    h.state.posts["7"] = {"status": "done", "number": 5, "counter": "special:taskmaster"}
+    ep = h.plan({"id": "7", "title": "Taskmaster - 3 Balls On a Hill", "timestamp": 1666000000})
+    assert (ep.season, ep.episode) == (0, 7)

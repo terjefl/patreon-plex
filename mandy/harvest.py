@@ -153,7 +153,11 @@ class Harvester:
         def numbered(counter: str, reserved: set[int] = frozenset()) -> int:
             # Assigned once per post and remembered, so retries keep the same number; a post that
             # moves (to a show's specials, say) gets a new number from its new counter.
-            if "number" not in post_state or post_state.get("counter", counter) != counter:
+            if (
+                "number" not in post_state
+                or post_state.get("counter", counter) != counter
+                or post_state["number"] in reserved  # an official special's number now
+            ):
                 post_state["number"] = self.state.next_number(counter, reserved)
             post_state["counter"] = counter
             return post_state["number"]
