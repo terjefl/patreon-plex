@@ -136,7 +136,9 @@ def main() -> None:
                 continue
             for old, new in planned:
                 moved.append((old, new))
-                clash = " [TAKEN]" if (new.exists() and not same_file(old, new)) or new in targets else ""
+                # (a real move has already happened, and refile itself refuses a taken name)
+                taken = args.dry_run and new.exists() and not same_file(old, new)
+                clash = " [TAKEN]" if taken or new in targets else ""
                 targets.add(new)
                 print(f"{post_id}: {old.relative_to(harvester.library_dir)}\n  -> {new.relative_to(harvester.library_dir)}{clash}")
         print(f"{len(moved)} file(s) {'would move' if args.dry_run else 'moved'}")
