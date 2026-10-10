@@ -225,11 +225,14 @@ def test_refile_never_moves_a_show_episode_to_her_own_videos(tmp_path):
         h.refile("1", move=False)
 
 
-def test_refile_renames_a_show_that_changes_only_in_case(tmp_path):
+def test_refile_renames_a_show_that_changes_only_in_case(tmp_path, monkeypatch):
     import os
 
     from mandy.config import Config, CreatorConfig
     from mandy.harvest import Harvester
+
+    # the NAS's CIFS mount gives each spelling its own inode, so samefile says no
+    monkeypatch.setattr(os.path, "samefile", lambda a, b: False)
 
     creator = CreatorConfig(creator="M", creator_name="Mandy Cane Lane", folder="", show_aliases={"Sick Of It": "Sick of It"})
     cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data", creators=[creator])

@@ -8,7 +8,7 @@ from yt_dlp.networking.exceptions import TransportError
 
 from . import plex
 from .config import Config, load_config
-from .harvest import Harvester, LoginExpired, heartbeat, refresh_plex
+from .harvest import Harvester, LoginExpired, heartbeat, refresh_plex, same_file
 from .likes import check_likes, mark_liked_watched
 from .stats import refresh_youtube, youtube_due
 
@@ -136,7 +136,7 @@ def main() -> None:
                 continue
             for old, new in planned:
                 moved.append((old, new))
-                clash = " [TAKEN]" if new.exists() or new in targets else ""
+                clash = " [TAKEN]" if (new.exists() and not same_file(old, new)) or new in targets else ""
                 targets.add(new)
                 print(f"{post_id}: {old.relative_to(harvester.library_dir)}\n  -> {new.relative_to(harvester.library_dir)}{clash}")
         print(f"{len(moved)} file(s) {'would move' if args.dry_run else 'moved'}")

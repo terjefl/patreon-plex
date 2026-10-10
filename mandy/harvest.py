@@ -515,8 +515,7 @@ class Harvester:
         season_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, old_files[0].with_suffix(".jpg"))
         for old, new in moves:
-            # On the NAS a name that differs only in case is the same file
-            same = new.exists() and os.path.samefile(new, old)
+            same = new.exists() and same_file(old, new)
             if new.exists() and not same:
                 raise FileExistsError(new)
             # thumbnail first, the video last: Plex should find the new sidecars with it
@@ -691,6 +690,15 @@ class Harvester:
         self.state.save()
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
         return result
+
+
+def same_file(old: Path, new: Path) -> bool:
+    """Whether new, which exists, is old under another case. On the NAS a name that differs
+    only in case is the same file, and its CIFS mount gives each spelling its own inode, so
+    samefile can't tell: a directory listing keeps the stored spelling, not the asked one."""
+    if str(old).casefold() == str(new).casefold():
+        return new.name not in os.listdir(new.parent)
+    return os.path.samefile(old, new)
 
 
 def _rename(old: Path, new: Path) -> None:
