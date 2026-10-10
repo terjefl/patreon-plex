@@ -19,7 +19,8 @@ class PlexEpisode:
     title: str
     aired: str  # YYYY-MM-DD
     watched: bool
-    path: Path  # as this container sees it
+    path: Path  # as this container sees it; for other sources, as Plex sees it
+    local: bool = True  # under library_path, i.e. one of ours
 
 
 def _get(cfg: Config, path: str) -> dict:
@@ -31,9 +32,10 @@ def _get(cfg: Config, path: str) -> dict:
         return json.loads(resp.read())["MediaContainer"]
 
 
-def episodes(cfg: Config, section_id: int | None = None) -> list[PlexEpisode]:
-    """Episodes in a Plex library (default plex.section_id) whose files are under library_path;
-    anything else in the library, such as another tool's downloads, is left out."""
+def episodes(cfg: Config, section_id: int | None = None, include_other: bool = False) -> list[PlexEpisode]:
+    """Episodes in a Plex library (default plex.section_id) whose files are under library_path.
+    With include_other, also the rest of the library (e.g. another tool's YouTube downloads),
+    as `local=False` with Plex's own path."""
     plex_root = cfg.plex.library_path.rstrip("/")
     result = []
     section = section_id or cfg.plex.section_id
@@ -41,7 +43,8 @@ def episodes(cfg: Config, section_id: int | None = None) -> list[PlexEpisode]:
         for media in item.get("Media", []):
             for part in media.get("Part", []):
                 file = part.get("file", "")
-                if not file.startswith(plex_root + "/"):
+                local = file.startswith(plex_root + "/")
+                if not local and not include_other:
                     continue
                 result.append(
                     PlexEpisode(
@@ -52,7 +55,8 @@ def episodes(cfg: Config, section_id: int | None = None) -> list[PlexEpisode]:
                         title=item.get("title", ""),
                         aired=item.get("originallyAvailableAt", ""),
                         watched=bool(item.get("viewCount")),
-                        path=cfg.library_dir / file[len(plex_root) + 1 :],
+                        path=cfg.library_dir / file[len(plex_root) + 1 :] if local else Path(file),
+                        local=local,
                     )
                 )
     return result

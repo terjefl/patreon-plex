@@ -56,7 +56,9 @@ A creator's library can also hold their videos from elsewhere, for example YouTu
 
 ## Index page
 
-With a `plex` section, the container serves an index page on `web_port` (default 8000): every downloaded episode grouped by show, with links to the Patreon post and the Plex episode, whether you have watched it in Plex, and whether you have liked it on Patreon. "Watched, not liked" is listed at the top, so you can like what you have seen.
+With a `plex` section, the container serves an index page on `web_port` (default 8000), titled after the creator: every episode grouped by show (or newest first on `/kronologisk`), with links to the Patreon post and the Plex episode, whether you have watched it in Plex, and whether you have liked it on Patreon. "Watched, not liked" is listed at the top, so you can like what you have seen.
+
+Episodes from other sources in a creator's Plex library, such as their YouTube videos downloaded by Pinchflat, are listed too, with a link to the video on YouTube (YouTube doesn't let anyone else read your likes, so the link is how you check) and a filter for the source. That needs the library to belong to that creator alone (`plex_section_id`, or the only creator).
 
 The page has no login of its own; put it behind an authenticating proxy (for example Cloudflare Access).
 

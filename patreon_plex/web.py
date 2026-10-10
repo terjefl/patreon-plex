@@ -1,5 +1,6 @@
-"""Index page: every downloaded episode, with links, Plex watched status and Patreon likes,
-plus the posts that are missing, in the place they would have had."""
+"""Index page for a creator: every episode, from Patreon and from other sources in the same Plex
+library (e.g. YouTube), with links, Plex watched status and Patreon likes, plus the Patreon posts
+that are missing, in the place they would have had."""
 
 import html
 import json
@@ -7,6 +8,7 @@ import logging
 import re
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +23,8 @@ from .state import State
 log = logging.getLogger(__name__)
 
 CACHE_SECONDS = 60
+# Pinchflat / yt-dlp file names end in "[<YouTube id>].<ext>"
+_YOUTUBE_ID = re.compile(r"\[([\w-]{11})\]\.\w+$")
 
 
 @dataclass
@@ -38,9 +42,13 @@ class Row:
     rating_key: str
     missing: str | None = None  # why a post has no episode: shown instead of watched/liked
     missing_detail: str = ""
+    source: str = "patreon"  # or "youtube" / "other": an episode another tool put in the library
+    youtube_url: str = ""
 
     @property
     def code(self) -> str:
+        if self.source != "patreon":
+            return ""  # date-based numbers like 2026 #100999 say nothing the date doesn't
         if not self.episode:
             return f"S{self.season:02d}" if self.season < 1000 else str(self.season)
         return f"S{self.season:02d}E{self.episode:02d}" if self.season < 1000 else f"{self.season} #{self.episode}"
@@ -57,16 +65,22 @@ class Index:
             return self._cache[1]
         sections: dict[int, list] = {}
         rows: list[Row] = []
+        # Other sources in a library belong to its creator only when it has just the one
+        users = Counter(self.cfg.section_for(c) for c in self.cfg.creators)
         for creator in self.cfg.creators:
             section = self.cfg.section_for(creator)
             if section not in sections:
-                sections[section] = plex.episodes(self.cfg, section)
+                sections[section] = plex.episodes(self.cfg, section, include_other=True)
             episodes = sections[section]
             state = State(self.cfg.data_dir / creator.creator / "state.json")
             by_file = post_files(state.posts)
             likes = LikeStore(self.cfg, creator).load()
             name = creator.creator_name or creator.creator
             for ep in episodes:
+                if not ep.local:
+                    if users[section] == 1:
+                        rows.append(self._other_row(name, ep))
+                    continue
                 post_id = by_file.get(ep.path)
                 if not post_id:
                     continue
@@ -88,6 +102,24 @@ class Index:
             rows.extend(_missing_rows(self.cfg, creator, state))
         self._cache = (time.time(), rows)
         return rows
+
+    def _other_row(self, creator: str, ep: plex.PlexEpisode) -> Row:
+        youtube = _YOUTUBE_ID.search(ep.path.name)
+        return Row(
+            creator=creator,
+            show=ep.show,
+            season=ep.season,
+            episode=ep.episode,
+            title=ep.title,
+            aired=ep.aired,
+            watched=ep.watched,
+            liked=None,
+            patreon_url="",
+            plex_url=plex.web_link(self.cfg, ep.rating_key),
+            rating_key=ep.rating_key,
+            source="youtube" if youtube else "other",
+            youtube_url=f"https://www.youtube.com/watch?v={youtube.group(1)}" if youtube else "",
+        )
 
     def refresh_likes(self) -> bool:
         """Re-check likes for watched posts in the background. False if already running."""
@@ -194,16 +226,32 @@ def _watched_button(r: Row) -> str:
 def _row_html(r: Row, show_name: bool = False) -> str:
     if r.missing:
         return _missing_row_html(r, show_name)
-    cls = " ".join(c for c, on in (("unwatched", not r.watched), ("unliked", r.liked is not True)) if on)
-    show = f'<span class="show">{_e(r.show)}</span> ' if show_name else ""
+    patreon = r.source == "patreon"
+    flags = (("pt" if patreon else "yt", True), ("unwatched", not r.watched), ("unliked", patreon and r.liked is not True))
+    cls = " ".join(c for c, on in flags if on)
+    # "Mandy Cane Lane - YouTube" -> "YouTube": the page is already about the creator
+    short_show = r.show.removeprefix(r.creator + " - ") if r.show != r.creator else r.show
+    show = f'<span class="show">{_e(short_show)}</span> ' if show_name else ""
+    if patreon:
+        liked = _badge(r.liked, "Likt", "Ikke likt")
+    elif r.youtube_url:
+        # YouTube doesn't tell anyone else what you have liked; the link is the way to check
+        liked = (
+            f'<a class="b unk" href="{_e(r.youtube_url)}" target="_blank" rel="noopener" title="Sjekk på YouTube om du har likt den">'
+            '<span class="long">Sjekk ↗</span><span class="short">↗</span></a>'
+        )
+    else:
+        liked = ""
+    links = [(r.patreon_url, "Patreon"), (r.youtube_url, "YouTube"), (r.plex_url, "Plex")]
     return (
         f'<tr class="{cls}" data-key="{_e(r.rating_key)}"><td class="code">{_e(r.code)}</td>'
         f"<td>{show}{_e(r.title)}</td>"
         f'<td class="date">{_e(r.aired)}</td>'
         f"<td>{_watched_button(r)}</td>"
-        f"<td>{_badge(r.liked, 'Likt', 'Ikke likt')}</td>"
-        f'<td class="links"><a href="{_e(r.patreon_url)}" target="_blank" rel="noopener">Patreon</a>'
-        f'<a href="{_e(r.plex_url)}" target="_blank" rel="noopener">Plex</a></td></tr>'
+        f"<td>{liked}</td>"
+        '<td class="links">'
+        + "".join(f'<a href="{_e(url)}" target="_blank" rel="noopener">{label}</a>' for url, label in links if url)
+        + "</td></tr>"
     )
 
 
@@ -211,7 +259,7 @@ def _missing_row_html(r: Row, show_name: bool = False) -> str:
     show = f'<span class="show">{_e(r.show)}</span> ' if show_name else ""
     cls = "queued" if r.missing == "I kø" or r.missing.startswith("Strupet") else "gone"
     return (
-        f'<tr class="missing"><td class="code">{_e(r.code)}</td>'
+        f'<tr class="missing pt"><td class="code">{_e(r.code)}</td>'
         f"<td>{show}{_e(r.title)}</td>"
         f'<td class="date">{_e(r.aired)}</td>'
         f'<td colspan="2"><span class="b {cls}" title="{_e(r.missing_detail)}">{_e(r.missing)}</span>'
@@ -224,12 +272,12 @@ def render(index: Index) -> str:
     all_rows = index.rows()
     rows = [r for r in all_rows if not r.missing]
     missing = [r for r in all_rows if r.missing]
-    todo = sorted((r for r in rows if r.watched and r.liked is not True), key=lambda r: r.aired)
+    todo = sorted((r for r in rows if r.source == "patreon" and r.watched and r.liked is not True), key=lambda r: r.aired)
     shows: dict[tuple[str, str], list[Row]] = {}
     for r in all_rows:
         shows.setdefault((r.creator, r.show), []).append(r)
-    # Creator's own "misc" show last, the rest alphabetically
-    order = sorted(shows, key=lambda k: (k[1] == k[0], k[1].casefold()))
+    # The creator's own shows ("Mandy Cane Lane", "Mandy Cane Lane - YouTube") last, the rest alphabetically
+    order = sorted(shows, key=lambda k: (k[1] == k[0] or k[1].startswith(k[0] + " - "), k[1].casefold()))
 
     head = "<thead><tr><th>Ep.</th><th>Tittel</th><th>Dato</th><th>Sett</th><th>Likt</th><th></th></tr></thead>"
     parts = []
@@ -285,6 +333,7 @@ def render_chrono(index: Index) -> str:
     return _page(index, "chrono", "".join(parts), rows, [], filters=("f-unwatched", "", "f-unliked"))
 
 
+_SOURCE_LABELS = {"patreon": "Patreon", "youtube": "YouTube", "other": "andre"}
 _FILTER_LABELS = {"": "Alle", "f-unwatched": "Ikke sett", "f-unliked": "Ikke likt", "f-missing": "Mangler"}
 
 
@@ -292,6 +341,8 @@ def _page(index: Index, page: str, content: str, rows: list[Row], missing: list[
     """The page around `content`. The first filter is the page's default."""
     watched = sum(r.watched for r in rows)
     liked = sum(r.liked is True for r in rows)
+    by_source = Counter(r.source for r in rows)
+    sources = " · ".join(f"{by_source[k]} {label}" for k, label in _SOURCE_LABELS.items() if by_source[k])
     refresh = (
         '<button disabled>Sjekker likerklikk …</button>'
         if index.refreshing
@@ -303,14 +354,20 @@ def _page(index: Index, page: str, content: str, rows: list[Row], missing: list[
         for f, label in _FILTER_LABELS.items()
         if f in filters
     )
+    src_radios = "".join(
+        f'<label><input type="radio" name="src" value="{v}"{" checked" if not v else ""}><span>{label}</span></label>'
+        for v, label in (("", "Alle kilder"), ("src-pt", "Patreon"), ("src-yt", "YouTube"))
+    ) if len(by_source) > 1 else ""
     views = (("shows", "./", "Per serie"), ("chrono", "kronologisk", "Kronologisk"))
     nav = "".join(f'<a href="{href}" class="{"on" if key == page else ""}">{label}</a>' for key, href, label in views)
+    names = [c.creator_name or c.creator for c in index.cfg.creators]
     return PAGE.format(
+        title=_e(" & ".join(names)),
         page=page,
         nav=nav,
-        filters=radios,
+        filters=radios + (f'<span class="sep"></span>{src_radios}' if src_radios else ""),
         default=filters[0],
-        summary=f"{len(rows)} episoder · {watched} sett · {liked} likt"
+        summary=f"{len(rows)} episoder ({sources}) · {watched} sett · {liked} likt på Patreon"
         + (f" · {len(missing)} mangler" if missing else ""),
         refresh=refresh,
         content=content,
@@ -321,7 +378,7 @@ def _page(index: Index, page: str, content: str, rows: list[Row], missing: list[
 PAGE = """<!doctype html>
 <html lang="no"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Patreon-videoer</title>
+<title>{title}</title>
 <style>
 :root {{ --bg:#f6f5f2; --fg:#1d1d1f; --muted:#6b6b70; --card:#fff; --line:#e4e2dd; --accent:#e5622b;
   --yes:#1f7a3f; --yes-bg:#e3f3e8; --no:#8a5a00; --no-bg:#fbefd5; --unk:#6b6b70; --unk-bg:#ecebe8;
@@ -365,6 +422,11 @@ body.f-unwatched tbody tr:not(.unwatched), body.f-unliked tbody tr:not(.unliked)
   body.f-missing tbody tr:not(.missing), body.f-missing details:not(:has(tr.missing)),
   body.f-missing section.todo,
   body.f-unwatched details:not(:has(tr.unwatched)), body.f-unliked details:not(:has(tr.unliked)) {{ display:none }}
+body.src-pt tbody tr.yt, body.src-yt tbody tr.pt, body.src-yt section.todo,
+  body.src-pt details:not(:has(tr.pt)), body.src-yt details:not(:has(tr.yt)),
+  body.src-pt.f-unwatched details:not(:has(tr.pt.unwatched)),
+  body.src-yt.f-unwatched details:not(:has(tr.yt.unwatched)) {{ display:none }}
+.sep {{ width:1px; background:var(--line); margin:0 4px }}
 .views {{ display:flex; gap:14px; margin:2px 0 4px }} .views a {{ color:var(--muted); text-decoration:none }}
 .views a.on {{ color:var(--accent); font-weight:600 }} .views a:hover {{ text-decoration:underline }}
 tr.missing td {{ color:var(--muted) }} tr.missing td:nth-child(2) {{ font-style:italic }}
@@ -377,17 +439,20 @@ footer {{ color:var(--muted); font-size:13px; margin-top:24px }}
   .links a {{ display:block; margin:2px 0 }} .why {{ display:none }} }}
 </style></head>
 <body class="{default}" data-page="{page}"><main>
-<header><div><h1>Patreon-videoer</h1><nav class="views">{nav}</nav><div class="sub">{summary}</div></div>
+<header><div><h1>{title}</h1><nav class="views">{nav}</nav><div class="sub">{summary}</div></div>
 <div class="filters">
 {filters}
 {refresh}</div></header>
 {content}
-<footer>Oppdatert {updated}. «Sett» kommer fra Plex. Likerklikk sjekkes hver time (sette episoder først), eller med knappen over. Poster som mangler står i kursiv der episoden skulle vært; hold over merket for å se feilen.</footer>
+<footer>Oppdatert {updated}. «Sett» kommer fra Plex. Likerklikk på Patreon sjekkes hver time (sette episoder først), eller med knappen over; YouTube viser ikke likerklikk til andre, så der lenker siden til videoen i stedet. Poster som mangler står i kursiv der episoden skulle vært; hold over merket for å se feilen.</footer>
 </main>
 <script>
-const fKey = document.body.dataset.page + ':f';
+const page = document.body.dataset.page;
+function applyFilters() {{
+  document.body.className = [...document.querySelectorAll('.filters input:checked')].map(i => i.value).join(' ');
+}}
 document.querySelectorAll('.filters input').forEach(i => i.addEventListener('change', () => {{
-  document.body.className = i.value; try {{ localStorage.setItem(fKey, i.value) }} catch (e) {{}}
+  applyFilters(); try {{ localStorage.setItem(page + ':' + i.name, i.value) }} catch (e) {{}}
 }}));
 async function setWatched(keys, watched) {{
   const r = await fetch('watched', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
@@ -418,8 +483,12 @@ document.addEventListener('click', async e => {{
   }} catch (err) {{ alert('Klarte ikke å oppdatere Plex: ' + err.message); }}
   b.disabled = false;
 }});
-try {{ const f = localStorage.getItem(fKey); if (f !== null) {{ const i = document.querySelector(`.filters input[value="${{f}}"]`);
-  if (i) {{ i.checked = true; document.body.className = f }} }} }} catch (e) {{}}
+for (const name of ['f', 'src']) {{
+  try {{ const v = localStorage.getItem(page + ':' + name);
+    const i = v !== null && document.querySelector(`.filters input[name="${{name}}"][value="${{v}}"]`);
+    if (i) i.checked = true }} catch (e) {{}}
+}}
+applyFilters();
 </script>
 </body></html>
 """
