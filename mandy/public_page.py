@@ -38,8 +38,9 @@ def items(rows: list, cfg: Config, creator: CreatorConfig) -> list[dict]:
         }
     out = list(posts.values())
     youtube = load_youtube(cfg, creator)
+    listing = youtube.get("listing", {})
     for vid in youtube["listed"]:
-        video = youtube["videos"].get(vid, {})
+        video = youtube["videos"].get(vid) or listing.get(vid, {})
         if video.get("members_only"):
             continue  # members only: no date and no public page to link to
         kind = video.get("kind", "video")

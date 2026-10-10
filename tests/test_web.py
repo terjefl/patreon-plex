@@ -66,7 +66,8 @@ def test_public_video_list_has_links_but_nothing_private(tmp_path, monkeypatch):
                 "", "http://plex/3", "3", source="youtube", youtube_url="https://www.youtube.com/watch?v=gtitf4ECTzY"),
     ]
     (cfg.data_dir / "M").mkdir(parents=True)
-    (cfg.data_dir / "M" / "youtube.json").write_text(_json.dumps({"checked": 0, "listed": ["gtitf4ECTzY", "old", "memb"], "videos": {
+    (cfg.data_dir / "M" / "youtube.json").write_text(_json.dumps({"checked": 0, "listed": ["gtitf4ECTzY", "old", "memb", "new"],
+        "listing": {"new": {"kind": "live", "duration": 9000, "title": "Not looked up yet"}}, "videos": {
         "gtitf4ECTzY": {"kind": "video", "date": "2026-10-09", "duration": 1145, "title": "WALLY"},
         "old": {"kind": "live", "date": "2018-04-08", "duration": 7200, "title": "ARK </script> stream"},
         "memb": {"kind": "video", "date": "", "duration": 60, "title": "Members", "members_only": True}}}))
@@ -74,7 +75,9 @@ def test_public_video_list_has_links_but_nothing_private(tmp_path, monkeypatch):
     patreon = [e for e in entries if e["s"] == "patreon"]
     assert len(patreon) == 2 and patreon[0]["d"] == 5400 and patreon[0]["t"] == "HOT FUZZ"  # parts merged
     assert patreon[0]["show"] == "Hot Fuzz"
-    assert [e["show"] for e in entries if e["s"] == "youtube"] == ["YouTube", "YouTube livestreams"]  # no members-only
+    youtube = [(e["show"], e["t"], e["date"]) for e in entries if e["s"] == "youtube"]
+    assert youtube[:2] == [("YouTube", "WALLY", "2026-10-09"), ("YouTube livestreams", "ARK </script> stream", "2018-04-08")]
+    assert youtube[2] == ("YouTube livestreams", "Not looked up yet", "") and len(youtube) == 3  # no members-only
     html = public_page.render_videos(rows, cfg, cfg.creators[0])
     assert "plex" not in html.casefold() and "Gitt opp" not in html and "dailymotion" not in html
     assert "watched" not in html.casefold() and "liked" not in html.casefold()

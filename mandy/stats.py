@@ -53,7 +53,8 @@ def _catalog_path(cfg: Config, creator: CreatorConfig) -> Path:
 
 
 def load_youtube(cfg: Config, creator: CreatorConfig) -> dict:
-    """{"checked": epoch, "listed": [ids on the channel], "videos": {id: {kind, date, duration, title}}}"""
+    """{"checked": epoch, "listed": [ids on the channel], "listing": {id: {kind, duration, title}} from the
+    channel's lists, "videos": {id: {kind, date, duration, title}} once looked up}"""
     try:
         return json.loads(_catalog_path(cfg, creator).read_text())
     except FileNotFoundError:
@@ -142,6 +143,8 @@ def _refresh_youtube(cfg: Config, creator: CreatorConfig, path: Path, max_new: i
             if n % 25 == 0:
                 _save(path, data)
     data["listed"] = sorted(listed)
+    # What the channel lists say, for videos not looked up yet (or that can't be)
+    data["listing"] = {vid: {"kind": k, "duration": d or 0, "title": t} for vid, (k, d, t) in listed.items()}
     left = len([vid for vid in listed if vid not in videos])
     # Come back in a day when done; sooner (next loop pass after an hour) while videos are left
     data["checked"] = time.time() if not left else time.time() - YOUTUBE_REFRESH_SECONDS + 3600

@@ -72,6 +72,7 @@ def test_youtube_refresh_looks_up_only_new_videos(tmp_path, monkeypatch):
     catalog = stats.load_youtube(cfg, cfg.creators[0])
     assert catalog["videos"]["s1"] == {"kind": "live", "date": "2018-04-01", "duration": 7200, "title": ""}
     assert not stats.youtube_due(cfg, cfg.creators[0])
+    assert catalog["listing"]["v2"] == {"kind": "video", "duration": 900, "title": ""}
 
 
 def test_stats_page_is_public_safe_and_in_english(tmp_path, monkeypatch):
