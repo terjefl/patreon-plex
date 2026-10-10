@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-from patreon_plex.harvest import post_text
-from patreon_plex.library import set_episode_plot
-from patreon_plex.titles import clean_plot
+from mandy.harvest import post_text
+from mandy.library import set_episode_plot
+from mandy.titles import clean_plot
 
 
 def para(*nodes):
@@ -51,8 +51,8 @@ def test_remove_orphans_keeps_videos_and_recent_files(tmp_path):
     import os
     import time
 
-    from patreon_plex.config import Config, CreatorConfig
-    from patreon_plex.harvest import Harvester
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
 
     cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c.txt", data_dir=tmp_path / "data",
                  creators=[CreatorConfig(creator="Someone")])
@@ -75,8 +75,8 @@ def test_failed_download_leaves_no_sidecars_or_parts(tmp_path, monkeypatch):
     import pytest
     from yt_dlp.utils import DownloadError
 
-    from patreon_plex import harvest
-    from patreon_plex.config import Config, CreatorConfig
+    from mandy import harvest
+    from mandy.config import Config, CreatorConfig
 
     cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c.txt", data_dir=tmp_path / "data",
                  creators=[CreatorConfig(creator="Someone")])
@@ -108,3 +108,15 @@ def test_failed_download_leaves_no_sidecars_or_parts(tmp_path, monkeypatch):
     with pytest.raises(DownloadError):
         h.download(info)
     assert not [p for p in (tmp_path / "lib").rglob("*") if p.is_file()]
+
+
+def test_empty_folder_puts_shows_at_the_library_root(tmp_path):
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
+
+    root = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c.txt", data_dir=tmp_path / "data",
+                  creators=[CreatorConfig(creator="M", creator_name="Mandy Cane Lane", folder="")])
+    sub = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c.txt", data_dir=tmp_path / "data",
+                 creators=[CreatorConfig(creator="M", creator_name="Mandy Cane Lane")])
+    assert Harvester(root, root.creators[0], dry_run=True).library_dir == tmp_path / "lib"
+    assert Harvester(sub, sub.creators[0], dry_run=True).library_dir == tmp_path / "lib" / "Mandy Cane Lane"

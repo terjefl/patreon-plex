@@ -10,14 +10,14 @@ class PlexConfig:
     url: str
     token: str
     section_id: int
-    library_path: str = "/Media01/Patreon"  # library_dir as Plex sees it
+    library_path: str = "/Media01/Mandy"  # library_dir as Plex sees it
 
 
 @dataclass
 class CreatorConfig:
     creator: str  # slug from patreon.com/c/<creator>
     creator_name: str | None = None
-    folder: str | None = None  # subfolder of library_dir; defaults to creator_name or slug
+    folder: str | None = None  # subfolder of library_dir; defaults to creator_name or slug; "" = library_dir itself
     since: date | None = None
     max_downloads_per_run: int = 0
     show_name_template: str = "{creator} - {show}"  # folder name
@@ -26,9 +26,6 @@ class CreatorConfig:
     show_aliases: dict[str, str] = field(default_factory=dict)
     # Official special numbers per show, e.g. {"Only Fools And Horses": {"Dates": 8}}
     specials: dict[str, dict[str, int]] = field(default_factory=dict)
-    # Plex library holding this creator's folder, when it isn't plex.section_id (e.g. one
-    # library per creator, shared with their YouTube downloads)
-    plex_section_id: int | None = None
     # The creator's YouTube channel (e.g. https://www.youtube.com/@MandyCaneLane), for the statistics page
     youtube_url: str | None = None
 
@@ -38,7 +35,7 @@ class CreatorConfig:
 
     @property
     def folder_name(self) -> str:
-        return self.folder or self.creator_name or self.creator
+        return self.folder if self.folder is not None else (self.creator_name or self.creator)
 
 
 @dataclass
@@ -55,10 +52,6 @@ class Config:
     heartbeat_url: str | None = None
     web_port: int | None = 8000  # index page (needs `plex`); None to disable
     plex: PlexConfig | None = None
-
-    def section_for(self, creator: CreatorConfig) -> int:
-        """The Plex library (section id) a creator's episodes are in."""
-        return creator.plex_section_id or self.plex.section_id
 
     def find_creator(self, slug: str) -> CreatorConfig:
         for c in self.creators:

@@ -1,7 +1,7 @@
 [project]
-name = "patreon-plex"
+name = "mandy"
 version = "0.1.0"
-description = "Download Patreon videos you have access to into a Plex-friendly TV library"
+description = "Mandy Cane Lane's videos from Patreon in a Plex TV library, with an index page and statistics (YouTube included)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-patreon-plex = "patreon_plex.__main__:main"
+mandy = "mandy.__main__:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

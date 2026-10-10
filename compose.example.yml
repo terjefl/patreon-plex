@@ -1,13 +1,13 @@
 services:
-  patreon-plex:
-    image: ghcr.io/terjefl/patreon-plex:latest
-    container_name: patreon-plex
+  mandy:
+    image: ghcr.io/terjefl/mandy:latest
+    container_name: mandy
     restart: unless-stopped
     ports:
-      - "8400:8000"   # index page
+      - "8400:8000"   # index page (mandy.flagan.net)
     environment:
       - TZ=Europe/Oslo
     volumes:
       - ./config:/config:ro    # config.yaml + cookies.txt
       - ./data:/data
-      - /path/to/media/Patreon:/library
+      - /path/to/media/Mandy:/library   # Plex: /Media01/Mandy

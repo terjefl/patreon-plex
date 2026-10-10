@@ -1,7 +1,7 @@
 import time
 
-from patreon_plex.config import Config, CreatorConfig
-from patreon_plex.harvest import THROTTLE_WAIT, THROTTLE_WAIT_MAX, Harvester, _linked_hosts, _YtdlpLogger
+from mandy.config import Config, CreatorConfig
+from mandy.harvest import THROTTLE_WAIT, THROTTLE_WAIT_MAX, Harvester, _linked_hosts, _YtdlpLogger
 
 
 def harvester(tmp_path):

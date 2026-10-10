@@ -64,22 +64,18 @@ class Index:
     def rows(self) -> list[Row]:
         if self._cache and time.time() - self._cache[0] < CACHE_SECONDS:
             return self._cache[1]
-        sections: dict[int, list] = {}
+        episodes = plex.episodes(self.cfg, include_other=True)
         rows: list[Row] = []
-        # Other sources in a library belong to its creator only when it has just the one
-        users = Counter(self.cfg.section_for(c) for c in self.cfg.creators)
+        # The rest of the library (YouTube) is Mandy's; with more creators it couldn't be told apart
+        alone = len(self.cfg.creators) == 1
         for creator in self.cfg.creators:
-            section = self.cfg.section_for(creator)
-            if section not in sections:
-                sections[section] = plex.episodes(self.cfg, section, include_other=True)
-            episodes = sections[section]
             state = State(self.cfg.data_dir / creator.creator / "state.json")
             by_file = post_files(state.posts)
             likes = LikeStore(self.cfg, creator).load()
             name = creator.creator_name or creator.creator
             for ep in episodes:
                 if not ep.local:
-                    if users[section] == 1:
+                    if alone:
                         rows.append(self._other_row(name, ep))
                     continue
                 post_id = by_file.get(ep.path)
@@ -496,14 +492,8 @@ applyFilters();
 
 
 def _stats_creator(cfg: Config, path: str) -> CreatorConfig | None:
-    """/statistikk is the (first) creator's page, /statistikk/<slug> any creator's."""
-    path = path.split("?", 1)[0].rstrip("/")
-    if path == "/statistikk":
-        return cfg.creators[0]
-    if path.startswith("/statistikk/"):
-        slug = path.removeprefix("/statistikk/").casefold()
-        return next((c for c in cfg.creators if c.creator.casefold() == slug), None)
-    return None
+    """/statistikk is Mandy's statistics page."""
+    return cfg.creators[0] if path.split("?", 1)[0].rstrip("/") == "/statistikk" else None
 
 
 _stats_cache: dict[str, tuple[float, str]] = {}

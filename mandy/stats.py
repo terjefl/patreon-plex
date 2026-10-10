@@ -124,7 +124,7 @@ def collect(cfg: Config, creator: CreatorConfig) -> list[tuple[str, str, float]]
     YouTube video with a known date. A Patreon post in parts counts once, with all its parts."""
     items: list[tuple[str, str, float]] = []
     if cfg.plex:
-        seconds = {ep.path: ep.duration for ep in plex.episodes(cfg, cfg.section_for(creator))}
+        seconds = {ep.path: ep.duration for ep in plex.episodes(cfg)}
         for post in State(cfg.data_dir / creator.creator / "state.json").posts.values():
             if post.get("status") != "done" or "published" not in post:
                 continue

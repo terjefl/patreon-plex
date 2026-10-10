@@ -1,7 +1,7 @@
 # Paths inside the container
-library_dir: /library              # each creator gets a subfolder here
+library_dir: /library              # Plex: /Media01/Mandy; the shows go right here (folder: "")
 cookies_file: /config/cookies.txt  # Netscape cookies.txt exported from a logged-in browser
-data_dir: /data                    # per-creator state.json and temporary files
+data_dir: /data                    # state.json, likes, YouTube list and temporary files
 
 interval_minutes: 60
 
@@ -18,31 +18,29 @@ pause_seconds: [60, 180]
 # plex:
 #   url: http://10.11.12.16:32400
 #   token: XXXXXXXX
-#   section_id: 12                   # default library; a creator can have its own (plex_section_id)
-#   library_path: /Media01/Patreon   # library_dir as Plex sees it
+#   section_id: 18                   # the "Mandy" library (also holds her YouTube from Pinchflat)
+#   library_path: /Media01/Mandy     # library_dir as Plex sees it
 
-# Index page with every episode, Plex watched status and Patreon likes (needs `plex`).
+# Index page (mandy.flagan.net) with every video, Plex watched status and Patreon likes (needs `plex`).
 # No login of its own: put it behind an authenticating proxy.
 web_port: 8000
 
 creators:
-  # Slug from https://www.patreon.com/c/<creator>/posts
+  # Slug from https://www.patreon.com/c/MandyCaneLane/posts
   - creator: MandyCaneLane
-    # Used in folder names; defaults to the slug.
+    # Used in folder and show names.
     creator_name: Mandy Cane Lane
-    # Subfolder of library_dir; defaults to creator_name.
-    # folder: Mandy Cane Lane
-    # Plex library for this creator, if not plex.section_id (e.g. one shared with their YouTube).
-    # plex_section_id: 18
+    # Subfolder of library_dir; "" puts the shows right in library_dir.
+    folder: ""
     # YouTube channel, for the statistics page (/statistikk): hours of video per month and year.
-    # youtube_url: https://www.youtube.com/@MandyCaneLane
+    youtube_url: https://www.youtube.com/@MandyCaneLane
     # Only download posts published on or after this date (omit for the whole archive).
     since: 2026-09-01
     # Cap per run, so a large backlog is spread over several runs (0 = no cap).
     max_downloads_per_run: 10
     # Folder name per source show, and for posts without "SxE" in the title.
     show_name_template: "{creator} - {show}"
-    # Show title in Plex. With several creators reacting to the same show, use "{show} ({creator})".
+    # Show title in Plex.
     show_title_template: "{show}"
     misc_show_name: "{creator}"
     # Map alternative spellings to one show name (matching ignores case, spacing and &/and).

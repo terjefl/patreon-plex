@@ -1,6 +1,6 @@
 import pytest
 
-from patreon_plex.titles import clean, parse_title, safe_filename, show_key
+from mandy.titles import clean, parse_title, safe_filename, show_key
 
 
 @pytest.mark.parametrize(
@@ -46,7 +46,7 @@ def test_safe_filename():
 def test_episode_display_title():
     from datetime import UTC, datetime
 
-    from patreon_plex.library import Episode
+    from mandy.library import Episode
 
     ep = Episode("1", "Show", "Show", "Show", 1, 4, "", "", datetime(2026, 1, 1, tzinfo=UTC), "")
     assert ep.display_title == "Episode 4"
@@ -54,7 +54,7 @@ def test_episode_display_title():
 
 
 def test_match_special():
-    from patreon_plex.harvest import _match_special
+    from mandy.harvest import _match_special
 
     table = {"Dates": 8, "The Jolly Boys' Outing": 9, "Rodney Come Home": 10}
     assert _match_special(table, "The Jolly Boys' Outing (Special)") == ("The Jolly Boys' Outing", 9)
@@ -64,7 +64,7 @@ def test_match_special():
 
 
 def test_next_number_skips_reserved(tmp_path):
-    from patreon_plex.state import State
+    from mandy.state import State
 
     s = State(tmp_path / "state.json")
     assert s.next_number("special:x", {1, 2, 4}) == 3
@@ -72,7 +72,7 @@ def test_next_number_skips_reserved(tmp_path):
 
 
 def test_config_throttle(tmp_path):
-    from patreon_plex.config import load_config
+    from mandy.config import load_config
 
     p = tmp_path / "c.yaml"
     p.write_text("library_dir: /l\ncookies_file: /c\ndata_dir: /d\nrate_limit: 4M\npause_seconds: [60, 180]\ncreators:\n  - creator: X\n")
@@ -100,7 +100,7 @@ def test_link_note_not_in_episode_title():
 
 
 def test_video_entries_prefers_patreon_copy():
-    from patreon_plex.harvest import _video_entries
+    from mandy.harvest import _video_entries
 
     embed = {"_type": "url", "url": "https://dai.ly/k7plojWDtkI8knBgoss"}
     native = {"id": "1", "formats": [{"url": "https://stream.mux.com/x.m3u8"}]}

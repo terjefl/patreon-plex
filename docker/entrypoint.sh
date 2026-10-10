@@ -6,4 +6,4 @@ if [ "${YTDLP_AUTO_UPDATE:-1}" = "1" ]; then
     pip install --no-cache-dir --quiet --upgrade "yt-dlp[default,curl-cffi]" || echo "yt-dlp update failed, using bundled version"
 fi
 
-exec patreon-plex --config "${CONFIG:-/config/config.yaml}" "$@"
+exec mandy --config "${CONFIG:-/config/config.yaml}" "$@"

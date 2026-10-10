@@ -74,7 +74,7 @@ def check_likes(cfg: Config, creator: CreatorConfig, only_watched: bool = False,
     store = LikeStore(cfg, creator)
     known = store.load()
     by_file = post_files(h.state.posts)
-    watched = {by_file[e.path] for e in plex.episodes(cfg, cfg.section_for(creator)) if e.watched and e.path in by_file}
+    watched = {by_file[e.path] for e in plex.episodes(cfg) if e.watched and e.path in by_file}
 
     urgent = [pid for pid in watched if not known.get(pid, {}).get("liked")]
     stale_before = time.time() - RECHECK_AFTER_DAYS * 86400
@@ -109,7 +109,7 @@ def mark_liked_watched(cfg: Config, creator: CreatorConfig) -> int:
     store = LikeStore(cfg, creator)
     known = store.load()
     marked = 0
-    for ep in plex.episodes(cfg, cfg.section_for(creator)):
+    for ep in plex.episodes(cfg):
         pid = by_file.get(ep.path)
         if not pid or ep.watched:
             continue

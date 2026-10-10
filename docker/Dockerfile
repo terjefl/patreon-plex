@@ -8,7 +8,7 @@ WORKDIR /app
 ENV PIP_ROOT_USER_ACTION=ignore
 
 COPY pyproject.toml README.md ./
-COPY patreon_plex patreon_plex
+COPY mandy mandy
 
 RUN pip install --no-cache-dir .
 

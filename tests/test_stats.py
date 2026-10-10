@@ -1,14 +1,14 @@
 import json
 import re
 
-from patreon_plex import plex, stats, stats_page
-from patreon_plex.config import Config, CreatorConfig, PlexConfig
+from mandy import plex, stats, stats_page
+from mandy.config import Config, CreatorConfig, PlexConfig
 
 
 def cfg_for(tmp_path, **creator):
     return Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data",
                   creators=[CreatorConfig(creator="M", creator_name="Mandy Cane Lane", **creator)],
-                  plex=PlexConfig(url="http://x", token="t", section_id=18, library_path="/Media01/Patreon"))
+                  plex=PlexConfig(url="http://x", token="t", section_id=18, library_path="/Media01/Mandy"))
 
 
 def test_aggregate_by_month_year_and_kind():

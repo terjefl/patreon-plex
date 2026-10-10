@@ -92,7 +92,8 @@ class Harvester:
         work_dir = cfg.data_dir / creator.creator
         work_dir.mkdir(parents=True, exist_ok=True)
         self.tmp_dir = work_dir / "tmp"
-        self.library_dir = cfg.library_dir / safe_filename(creator.folder_name)
+        folder = creator.folder_name
+        self.library_dir = cfg.library_dir / safe_filename(folder) if folder else cfg.library_dir
         # yt-dlp writes refreshed cookies back to the cookie file, so work on a copy
         # and leave the (possibly read-only) mounted original alone.
         self.cookies = work_dir / "cookies.txt"
@@ -517,7 +518,7 @@ class Harvester:
                         changed.append(Path(file))
                         log.info("Updated description: %s", nfo.name)
         if changed and self.cfg.plex:
-            keys = {ep.path: ep.rating_key for ep in plex.episodes(self.cfg, self.cfg.section_for(self.creator))}
+            keys = {ep.path: ep.rating_key for ep in plex.episodes(self.cfg)}
             for file in changed:
                 if file in keys:
                     plex.refresh_metadata(self.cfg, keys[file])
@@ -720,15 +721,14 @@ def _post_id(entry: dict) -> str:
     return match.group(1)
 
 
-def refresh_plex(cfg: Config, section_id: int | None = None) -> None:
+def refresh_plex(cfg: Config) -> None:
     plex = cfg.plex
     if not plex:
         return
-    section = section_id or plex.section_id
-    url = f"{plex.url.rstrip('/')}/library/sections/{section}/refresh?X-Plex-Token={plex.token}"
+    url = f"{plex.url.rstrip('/')}/library/sections/{plex.section_id}/refresh?X-Plex-Token={plex.token}"
     try:
         urllib.request.urlopen(url, timeout=30).read()
-        log.info("Triggered Plex library scan (section %s)", section)
+        log.info("Triggered Plex library scan")
     except Exception as e:
         log.warning("Plex refresh failed: %s", e)
 

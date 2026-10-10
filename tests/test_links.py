@@ -5,8 +5,8 @@ import pytest
 from yt_dlp.networking.exceptions import TransportError
 from yt_dlp.utils import DownloadError
 
-from patreon_plex.config import Config, CreatorConfig
-from patreon_plex.harvest import Harvester, linked_videos
+from mandy.config import Config, CreatorConfig
+from mandy.harvest import Harvester, linked_videos
 
 
 def doc(*paragraphs):
@@ -84,9 +84,9 @@ def test_failed_lookup_is_retried_not_no_media(tmp_path):
 
 
 def test_no_media_error_from_ytdlp_is_quiet(caplog):
-    from patreon_plex.harvest import _YtdlpLogger
+    from mandy.harvest import _YtdlpLogger
 
-    caplog.set_level("DEBUG", logger="patreon_plex.harvest")
+    caplog.set_level("DEBUG", logger="mandy.harvest")
     _YtdlpLogger().error("ERROR: [patreon] 1: No supported media found in this post")
     _YtdlpLogger().error("ERROR: [GoogleDrive] x: HTTP Error 429")
     assert [r.levelname for r in caplog.records] == ["DEBUG", "ERROR"]
