@@ -76,6 +76,10 @@ A like means you have seen the episode, often before it was downloaded, so liked
 
 The YouTube channel's lists give each video's length but not its date, so dates are looked up once per video and kept in `data/MandyCaneLane/youtube.json`. The loop refreshes the list daily and looks up at most 300 new videos at a time; `youtube-stats --all` fills it in one go (about 1–2 seconds per video).
 
+## Public video list
+
+`/videos` lists everything she has posted: every Patreon video post (downloaded or not; parts merged) and everything on her YouTube channel, by show or newest first, with search and a Patreon/YouTube filter, and a link straight to each post or video. Like the statistics page it is in English and shows nothing private, so it is public too (its own Cloudflare Access bypass) and can be shared with her.
+
 ## Monitoring
 
 When the cookie expires, every run fails with `Patreon login expired`. Set `heartbeat_url` to an Uptime Kuma push monitor to be alerted. Export a new `cookies.txt`; the next run picks it up without a restart.

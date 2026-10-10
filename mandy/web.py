@@ -19,6 +19,7 @@ from .config import Config, CreatorConfig
 from .harvest import MAX_ATTEMPTS, Harvester
 from .likes import LikeStore, check_likes, post_files
 from .state import State
+from .public_page import render_videos
 from .stats_page import render_stats
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class Row:
     missing_detail: str = ""
     source: str = "patreon"  # or "youtube" / "other": an episode another tool put in the library
     youtube_url: str = ""
+    duration: float = 0.0  # seconds
 
     @property
     def code(self) -> str:
@@ -94,6 +96,7 @@ class Index:
                         patreon_url=f"https://www.patreon.com/posts/{post_id}",
                         plex_url=plex.web_link(self.cfg, ep.rating_key),
                         rating_key=ep.rating_key,
+                        duration=ep.duration,
                     )
                 )
             rows.extend(_missing_rows(self.cfg, creator, state))
@@ -116,6 +119,7 @@ class Index:
             rating_key=ep.rating_key,
             source="youtube" if youtube else "other",
             youtube_url=f"https://www.youtube.com/watch?v={youtube.group(1)}" if youtube else "",
+            duration=ep.duration,
         )
 
     def refresh_likes(self) -> bool:
@@ -355,7 +359,7 @@ def _page(index: Index, page: str, content: str, rows: list[Row], missing: list[
         f'<label><input type="radio" name="src" value="{v}"{" checked" if not v else ""}><span>{label}</span></label>'
         for v, label in (("", "Alle kilder"), ("src-pt", "Patreon"), ("src-yt", "YouTube"))
     ) if len(by_source) > 1 else ""
-    views = (("shows", "./", "Per serie"), ("chrono", "kronologisk", "Kronologisk"), ("stats", "statistikk", "Statistikk ↗"))
+    views = (("shows", "./", "Per serie"), ("chrono", "kronologisk", "Kronologisk"), ("stats", "statistikk", "Statistikk ↗"), ("videos", "videos", "Offentlig liste ↗"))
     nav = "".join(f'<a href="{href}" class="{"on" if key == page else ""}">{label}</a>' for key, href, label in views)
     names = [c.creator_name or c.creator for c in index.cfg.creators]
     return PAGE.format(
@@ -526,7 +530,13 @@ def serve(cfg: Config, port: int) -> ThreadingHTTPServer:
         def do_GET(self):
             page = {"/": render, "/index.html": render, "/kronologisk": render_chrono}.get(self.path)
             creator = _stats_creator(cfg, self.path)
-            if creator:
+            if self.path.split("?", 1)[0].rstrip("/") == "/videos":
+                try:
+                    self._send(200, render_videos(index.rows(), cfg, cfg.creators[0]))
+                except Exception as e:
+                    log.exception("Rendering the video list failed")
+                    self._send(500, f"<p>Could not make the page: {_e(e)}</p>")
+            elif creator:
                 try:
                     self._send(200, _cached_stats(cfg, creator))
                 except Exception as e:

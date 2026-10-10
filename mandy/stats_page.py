@@ -166,7 +166,7 @@ PAGE = """<!doctype html>
 body {{ margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system,system-ui,Segoe UI,Roboto,sans-serif }}
 main {{ max-width:1000px; margin:0 auto; padding:28px 16px 64px }}
 h1 {{ margin:0; font-size:28px }} h2 {{ font-size:18px; margin:0 0 10px }} h3 {{ font-size:15px; margin:18px 0 6px }}
-.sub, .note {{ color:var(--muted) }} .note {{ font-size:13px; margin:6px 0 0 }}
+.sub, .note {{ color:var(--muted) }} .sub a {{ color:var(--patreon) }} .note {{ font-size:13px; margin:6px 0 0 }}
 .tiles {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:20px 0 }}
 .tile, section {{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px }}
 section {{ margin:12px 0 }}
@@ -196,7 +196,7 @@ footer {{ color:var(--muted); font-size:13px; margin-top:24px }}
 </style></head>
 <body><main>
 <h1>{name}</h1>
-<div class="sub">Hours of video, on Patreon and YouTube</div>
+<div class="sub">Hours of video, on Patreon and YouTube · <a href="videos">All videos</a></div>
 <div class="tiles">{tiles}</div>
 {chart}
 <section><h2>Year by year</h2><div class="scroll">{years}</div></section>

@@ -45,3 +45,37 @@ def test_youtube_episodes_in_the_creators_library_are_listed_with_a_youtube_link
     assert "https://www.youtube.com/watch?v=gtitf4ECTzY" in yt_row and "Sjekk på YouTube" in yt_row and '<span class="show">YouTube</span>' in yt_row
     assert "patreon.com" not in yt_row and "http://plex/2" in yt_row
     assert 'name="src"' in html
+
+
+def test_public_video_list_has_links_but_nothing_private(tmp_path, monkeypatch):
+    import json as _json
+
+    from mandy import public_page, stats
+
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data",
+                 creators=[CreatorConfig(creator="M", creator_name="Mandy Cane Lane")],
+                 plex=PlexConfig(url="http://x", token="t", section_id=18))
+    rows = [
+        web.Row("Mandy Cane Lane", "Mandy Cane Lane - Hot Fuzz", 2023, 73, "HOT FUZZ - pt1", "2023-09-12", True, True,
+                "https://www.patreon.com/posts/89651562", "http://plex/1", "1", duration=3000),
+        web.Row("Mandy Cane Lane", "Mandy Cane Lane - Hot Fuzz", 2023, 73, "HOT FUZZ - pt2", "2023-09-12", True, True,
+                "https://www.patreon.com/posts/89651562", "http://plex/2", "2", duration=2400),
+        web.Row("Mandy Cane Lane", "Taskmaster", 11, 6, "Absolute Casserol", "2024-07-23", False, None,
+                "https://www.patreon.com/posts/108645872", "", "", missing="Gitt opp", missing_detail="dailymotion: 401"),
+        web.Row("Mandy Cane Lane", "Mandy Cane Lane - YouTube", 2026, 100999, "WALLY", "2026-10-09", True, None,
+                "", "http://plex/3", "3", source="youtube", youtube_url="https://www.youtube.com/watch?v=gtitf4ECTzY"),
+    ]
+    (cfg.data_dir / "M").mkdir(parents=True)
+    (cfg.data_dir / "M" / "youtube.json").write_text(_json.dumps({"checked": 0, "listed": ["gtitf4ECTzY", "old", "memb"], "videos": {
+        "gtitf4ECTzY": {"kind": "video", "date": "2026-10-09", "duration": 1145, "title": "WALLY"},
+        "old": {"kind": "live", "date": "2018-04-08", "duration": 7200, "title": "ARK </script> stream"},
+        "memb": {"kind": "video", "date": "", "duration": 60, "title": "Members", "members_only": True}}}))
+    entries = public_page.items(rows, cfg, cfg.creators[0])
+    patreon = [e for e in entries if e["s"] == "patreon"]
+    assert len(patreon) == 2 and patreon[0]["d"] == 5400 and patreon[0]["t"] == "HOT FUZZ"  # parts merged
+    assert patreon[0]["show"] == "Hot Fuzz"
+    assert [e["show"] for e in entries if e["s"] == "youtube"] == ["YouTube", "YouTube livestreams"]  # no members-only
+    html = public_page.render_videos(rows, cfg, cfg.creators[0])
+    assert "plex" not in html.casefold() and "Gitt opp" not in html and "dailymotion" not in html
+    assert "watched" not in html.casefold() and "liked" not in html.casefold()
+    assert "<\\/script>" in html and "ARK </script>" not in html  # titles can't break out of the data block
