@@ -26,7 +26,13 @@ log = logging.getLogger(__name__)
 YOUTUBE_TABS = {"videos": "video", "streams": "live", "shorts": "short"}
 KINDS = ("patreon", "video", "live", "short")
 YOUTUBE_REFRESH_SECONDS = 20 * 3600
-PAUSE_BETWEEN_VIDEOS = 1.0
+PAUSE_BETWEEN_VIDEOS = 3.0
+# YouTube answers "Video unavailable" for everything once it rate-limits a session; after this many
+# failures in a row, stop and leave the rest for the next refresh.
+MAX_FAILURES_IN_A_ROW = 15
+# Members-only videos can't be looked up without a member's login; noted so they aren't retried.
+MEMBERS_ONLY = ("members-only", "channel's members")
+LOCK_MAX_AGE = 3 * 3600
 
 
 class _Quiet:
@@ -71,6 +77,19 @@ def refresh_youtube(cfg: Config, creator: CreatorConfig, max_new: int | None = 3
     if not creator.youtube_url:
         return 0
     path = _catalog_path(cfg, creator)
+    lock = path.with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if lock.exists() and time.time() - lock.stat().st_mtime < LOCK_MAX_AGE:
+        log.info("A YouTube refresh is already running for %s", creator.creator)
+        return -1
+    lock.touch()
+    try:
+        return _refresh_youtube(cfg, creator, path, max_new)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def _refresh_youtube(cfg: Config, creator: CreatorConfig, path: Path, max_new: int | None) -> int:
     data = load_youtube(cfg, creator)
     base = creator.youtube_url.rstrip("/")
     listed: dict[str, tuple[str, float | None, str]] = {}
@@ -93,14 +112,26 @@ def refresh_youtube(cfg: Config, creator: CreatorConfig, max_new: int | None = 3
     videos = data["videos"]
     new = [vid for vid in listed if vid not in videos]
     todo = new if max_new is None else new[:max_new]
+    found = failures = 0
     with YoutubeDL({"quiet": True, "logger": _Quiet()}) as ydl:
         for n, vid in enumerate(todo, start=1):
             kind, duration, title = listed[vid]
+            if n > 1:
+                time.sleep(PAUSE_BETWEEN_VIDEOS)
             try:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False, process=False)
             except DownloadError as e:
+                if any(m in str(e) for m in MEMBERS_ONLY):
+                    videos[vid] = {"kind": kind, "date": "", "duration": duration or 0, "title": title, "members_only": True}
+                    continue
+                failures += 1
                 log.info("YouTube %s: %s", vid, e)
+                if failures >= MAX_FAILURES_IN_A_ROW:
+                    log.warning("YouTube keeps refusing (rate limited?); %d left for the next refresh", len(todo) - n)
+                    break
                 continue
+            failures = 0
+            found += 1
             day = info.get("upload_date") or ""
             videos[vid] = {
                 "kind": kind,
@@ -110,12 +141,12 @@ def refresh_youtube(cfg: Config, creator: CreatorConfig, max_new: int | None = 3
             }
             if n % 25 == 0:
                 _save(path, data)
-            time.sleep(PAUSE_BETWEEN_VIDEOS)
     data["listed"] = sorted(listed)
-    data["checked"] = time.time()
+    left = len([vid for vid in listed if vid not in videos])
+    # Come back in a day when done; sooner (next loop pass after an hour) while videos are left
+    data["checked"] = time.time() if not left else time.time() - YOUTUBE_REFRESH_SECONDS + 3600
     _save(path, data)
-    left = len(new) - len(todo)
-    log.info("%s: %d YouTube videos listed, %d looked up, %d left for later", creator.creator, len(listed), len(todo), left)
+    log.info("%s: %d YouTube videos listed, %d dated now, %d left for later", creator.creator, len(listed), found, left)
     return left
 
 
@@ -124,13 +155,20 @@ def collect(cfg: Config, creator: CreatorConfig) -> list[tuple[str, str, float]]
     YouTube video with a known date. A Patreon post in parts counts once, with all its parts."""
     items: list[tuple[str, str, float]] = []
     if cfg.plex:
-        seconds = {ep.path: ep.duration for ep in plex.episodes(cfg)}
+        episodes = {ep.path: ep for ep in plex.episodes(cfg)}
         for post in State(cfg.data_dir / creator.creator / "state.json").posts.values():
-            if post.get("status") != "done" or "published" not in post:
+            if post.get("status") != "done":
                 continue
-            total = sum(seconds.get(Path(f), 0) for f in post.get("files", []))
-            if total:
+            parts = [episodes[Path(f)] for f in post.get("files", []) if Path(f) in episodes]
+            total = sum(ep.duration for ep in parts)
+            if not total:
+                continue
+            if "published" in post:
                 day = datetime.fromtimestamp(post["published"], tz=UTC).strftime("%Y-%m-%d")
+            else:
+                # posts downloaded before dates were kept in state; Plex has it from the .nfo
+                day = next((ep.aired for ep in parts if ep.aired), "")
+            if day:
                 items.append(("patreon", day, total))
     youtube = load_youtube(cfg, creator)
     for vid in youtube["listed"]:

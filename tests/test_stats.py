@@ -66,6 +66,7 @@ def test_youtube_refresh_looks_up_only_new_videos(tmp_path, monkeypatch):
     monkeypatch.setattr(stats, "PAUSE_BETWEEN_VIDEOS", 0)
     FakeYDL.lookups = []
     assert stats.refresh_youtube(cfg, cfg.creators[0], max_new=2) == 1  # one left for the next run
+    assert stats.youtube_due(cfg, cfg.creators[0]) is False  # ...due again within the hour, not now
     assert stats.refresh_youtube(cfg, cfg.creators[0]) == 0
     assert sorted(FakeYDL.lookups) == ["s1", "v1", "v2"]  # each looked up once
     catalog = stats.load_youtube(cfg, cfg.creators[0])
@@ -83,3 +84,35 @@ def test_stats_page_is_public_safe_and_in_english(tmp_path, monkeypatch):
     assert "2 videos since Oct 2022" in html and "2 h 20 m" in html  # Patreon total: 50 + 90 minutes
     assert "plex" not in html.casefold() and "watched" not in html.casefold()
     assert len(re.findall(r'class="hit"', html)) == 4  # Oct 2022 .. Jan 2023
+
+
+def test_patreon_post_without_saved_date_uses_the_plex_date(tmp_path, monkeypatch):
+    cfg = cfg_for(tmp_path)
+    f = cfg.library_dir / "x.mp4"
+    (cfg.data_dir / "M").mkdir(parents=True)
+    (cfg.data_dir / "M" / "state.json").write_text(json.dumps({"posts": {"1": {"status": "done", "files": [str(f)]}}}))
+    monkeypatch.setattr(plex, "episodes", lambda cfg, include_other=False: [
+        plex.PlexEpisode("1", "S", 1, 1, "x", "2026-08-14", False, f, duration=1200)])
+    assert stats.collect(cfg, cfg.creators[0]) == [("patreon", "2026-08-14", 1200)]
+
+
+class ThrottledYDL(FakeYDL):
+    def extract_info(self, url, download, process=True):
+        if self.flat:
+            return {"entries": [{"id": f"v{i}", "duration": 60} for i in range(40)]} if url.endswith("/videos") else {"entries": []}
+        vid = url.rsplit("=", 1)[1]
+        FakeYDL.lookups.append(vid)
+        if vid == "v0":
+            raise stats.DownloadError("ERROR: [youtube] v0: Join this channel to get access to members-only content")
+        raise stats.DownloadError(f"ERROR: [youtube] {vid}: Video unavailable")
+
+
+def test_youtube_refresh_stops_when_throttled_and_skips_members_only(tmp_path, monkeypatch):
+    cfg = cfg_for(tmp_path, youtube_url="https://www.youtube.com/@Mandy")
+    monkeypatch.setattr(stats, "YoutubeDL", ThrottledYDL)
+    monkeypatch.setattr(stats, "PAUSE_BETWEEN_VIDEOS", 0)
+    FakeYDL.lookups = []
+    assert stats.refresh_youtube(cfg, cfg.creators[0], max_new=None) == 39
+    assert len(FakeYDL.lookups) == 1 + stats.MAX_FAILURES_IN_A_ROW  # stopped asking
+    assert stats.load_youtube(cfg, cfg.creators[0])["videos"]["v0"]["members_only"]
+    assert not (cfg.data_dir / "M" / "youtube.lock").exists()
