@@ -26,6 +26,9 @@ class CreatorConfig:
     show_aliases: dict[str, str] = field(default_factory=dict)
     # Official special numbers per show, e.g. {"Only Fools And Horses": {"Dates": 8}}
     specials: dict[str, dict[str, int]] = field(default_factory=dict)
+    # Plex library holding this creator's folder, when it isn't plex.section_id (e.g. one
+    # library per creator, shared with their YouTube downloads)
+    plex_section_id: int | None = None
 
     @property
     def campaign_url(self) -> str:
@@ -50,6 +53,10 @@ class Config:
     heartbeat_url: str | None = None
     web_port: int | None = 8000  # index page (needs `plex`); None to disable
     plex: PlexConfig | None = None
+
+    def section_for(self, creator: CreatorConfig) -> int:
+        """The Plex library (section id) a creator's episodes are in."""
+        return creator.plex_section_id or self.plex.section_id
 
     def find_creator(self, slug: str) -> CreatorConfig:
         for c in self.creators:

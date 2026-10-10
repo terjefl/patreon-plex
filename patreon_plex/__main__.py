@@ -24,6 +24,7 @@ def _is_network_error(e: BaseException | None) -> bool:
 def run_once(cfg: Config) -> bool:
     downloaded = failed = pending = 0
     errors: list[str] = []
+    to_scan: set[int] = set()  # Plex libraries with new episodes
     for creator in cfg.creators:
         harvester = Harvester(cfg, creator)
         try:
@@ -41,6 +42,8 @@ def run_once(cfg: Config) -> bool:
             errors.append(f"{creator.creator}: {e}")
             continue
         downloaded += len(result.downloaded)
+        if result.downloaded and cfg.plex:
+            to_scan.add(cfg.section_for(creator))
         failed += len(result.failed)
         pending += result.pending
         if cfg.plex:
@@ -49,8 +52,8 @@ def run_once(cfg: Config) -> bool:
                 mark_liked_watched(cfg, creator)
             except Exception as e:  # like status is a nicety; never fail the run over it
                 log.warning("Checking like status failed: %s", e)
-    if downloaded:
-        refresh_plex(cfg)
+    for section in sorted(to_scan):
+        refresh_plex(cfg, section)
     msg = f"{downloaded} downloaded, {failed} failed, {pending} pending"
     if errors:
         msg += " | " + "; ".join(errors)

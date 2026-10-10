@@ -18,7 +18,7 @@ pause_seconds: [60, 180]
 # plex:
 #   url: http://10.11.12.16:32400
 #   token: XXXXXXXX
-#   section_id: 12
+#   section_id: 12                   # default library; a creator can have its own (plex_section_id)
 #   library_path: /Media01/Patreon   # library_dir as Plex sees it
 
 # Index page with every episode, Plex watched status and Patreon likes (needs `plex`).
@@ -32,6 +32,8 @@ creators:
     creator_name: Mandy Cane Lane
     # Subfolder of library_dir; defaults to creator_name.
     # folder: Mandy Cane Lane
+    # Plex library for this creator, if not plex.section_id (e.g. one shared with their YouTube).
+    # plex_section_id: 18
     # Only download posts published on or after this date (omit for the whole archive).
     since: 2026-09-01
     # Cap per run, so a large backlog is spread over several runs (0 = no cap).

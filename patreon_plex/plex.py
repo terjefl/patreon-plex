@@ -31,10 +31,13 @@ def _get(cfg: Config, path: str) -> dict:
         return json.loads(resp.read())["MediaContainer"]
 
 
-def episodes(cfg: Config) -> list[PlexEpisode]:
+def episodes(cfg: Config, section_id: int | None = None) -> list[PlexEpisode]:
+    """Episodes in a Plex library (default plex.section_id) whose files are under library_path;
+    anything else in the library, such as another tool's downloads, is left out."""
     plex_root = cfg.plex.library_path.rstrip("/")
     result = []
-    for item in _get(cfg, f"/library/sections/{cfg.plex.section_id}/allLeaves").get("Metadata", []):
+    section = section_id or cfg.plex.section_id
+    for item in _get(cfg, f"/library/sections/{section}/allLeaves").get("Metadata", []):
         for media in item.get("Media", []):
             for part in media.get("Part", []):
                 file = part.get("file", "")

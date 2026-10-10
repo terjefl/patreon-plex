@@ -46,6 +46,10 @@ Commands (`docker exec patreon-plex patreon-plex --config /config/config.yaml <c
 
 Create a **TV Shows** library and add each creator's folder (for example `Patreon/Mandy Cane Lane`) as a folder in it. Plex expects the show folders directly under each library folder. Choose the **Plex NFO Series** agent with the **Plex TV Series** scanner. It reads the `.nfo` sidecars, so titles, descriptions, dates, posters and episode thumbnails all show up, and Plex doesn't try to match the folders against real TV shows.
 
+With several creators, give each one its own library if you like: set `plex_section_id` on the creator to that library's id, and `plex.section_id` stays the default for the others. Scans, watched status, likes and the index page then use each creator's own library.
+
+A creator's library can also hold their videos from elsewhere, for example YouTube downloads from [Pinchflat](https://github.com/kieraneglin/pinchflat) as a show of its own. Add that folder to the same library and keep it outside `library_dir`: patreon-plex only looks at, cleans up and lists files under `library_dir` that it downloaded itself. For Pinchflat, a media profile with NFO files and the template `/TV/{{ source_custom_name }}/{{ source_custom_name }}/{{ season_by_year__episode_by_date_and_index }} - {{ title }} [{{ id }}].{{ ext }}` gives one show per channel with a season per year; add `…/TV/<source name>` as the library folder.
+
 ## Throttling
 
 `rate_limit` caps the download speed and `pause_seconds` adds a random pause between videos, and `max_downloads_per_run` spreads a large backlog over several hourly runs. Downloads are otherwise far faster than real-time playback (an hour of video in about two minutes), which is an unusual pattern for one account.

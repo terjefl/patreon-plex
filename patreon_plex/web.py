@@ -55,9 +55,13 @@ class Index:
     def rows(self) -> list[Row]:
         if self._cache and time.time() - self._cache[0] < CACHE_SECONDS:
             return self._cache[1]
-        episodes = plex.episodes(self.cfg)
+        sections: dict[int, list] = {}
         rows: list[Row] = []
         for creator in self.cfg.creators:
+            section = self.cfg.section_for(creator)
+            if section not in sections:
+                sections[section] = plex.episodes(self.cfg, section)
+            episodes = sections[section]
             state = State(self.cfg.data_dir / creator.creator / "state.json")
             by_file = post_files(state.posts)
             likes = LikeStore(self.cfg, creator).load()
