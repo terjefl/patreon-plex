@@ -1,6 +1,7 @@
 import argparse
 import logging
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from yt_dlp.networking.exceptions import TransportError
@@ -150,6 +151,15 @@ def main() -> None:
                         plex.refresh_metadata(cfg, ep.rating_key)
                         wanted.discard(ep.path)
             print(f"Plex re-read {len(moved) - len(wanted)} episode(s)" + (f"; {len(wanted)} not found yet" if wanted else ""))
+            time.sleep(15)
+            # Plex may keep a moved episode under its old show; fold such shows into the right one
+            nfo_shows = {}
+            for ep in plex.episodes(cfg):
+                nfo = ep.path.with_suffix(".nfo")
+                if nfo.exists():
+                    nfo_shows[ep.path] = ET.parse(nfo).getroot().findtext("showtitle") or ep.show
+            for old_show, new_show in plex.merge_stale_shows(cfg, nfo_shows):
+                print(f"Plex: merged the show {old_show!r} into {new_show!r}")
     elif args.command == "youtube-stats":
         for creator in cfg.creators:
             if creator.youtube_url:

@@ -93,6 +93,35 @@ def refresh_metadata(cfg: Config, rating_key: str) -> None:
     urllib.request.urlopen(urllib.request.Request(url, method="PUT"), timeout=30).read()
 
 
+def merge_stale_shows(cfg: Config, show_titles: dict[Path, str]) -> list[tuple[str, str]]:
+    """After files moved to another show's folder, Plex can keep an episode under its old show.
+    Merge each such old show into the show the episode's .nfo names, but only when every
+    episode of the old show belongs there. show_titles: episode path -> wanted show title.
+    Returns (old show, new show) merged."""
+    plex_root = cfg.plex.library_path.rstrip("/")
+    section = f"/library/sections/{cfg.plex.section_id}"
+    shows = {s["title"]: s["ratingKey"] for s in _get(cfg, f"{section}/all").get("Metadata", [])}
+    wants: dict[str, set] = {}
+    titles: dict[str, str] = {}
+    for item in _get(cfg, f"{section}/allLeaves").get("Metadata", []):
+        file = item["Media"][0]["Part"][0]["file"]
+        path = cfg.library_dir / file[len(plex_root) + 1:] if file.startswith(plex_root + "/") else None
+        key = item.get("grandparentRatingKey")
+        titles[key] = item.get("grandparentTitle", "")
+        wants.setdefault(key, set()).add(show_titles.get(path, item.get("grandparentTitle", "")))
+    merged = []
+    for key, wanted in wants.items():
+        if len(wanted) != 1:
+            continue
+        target = next(iter(wanted))
+        if target != titles[key] and target in shows:
+            query = urllib.parse.urlencode({"ids": key, "X-Plex-Token": cfg.plex.token})
+            url = f"{cfg.plex.url.rstrip('/')}/library/metadata/{shows[target]}/merge?{query}"
+            urllib.request.urlopen(urllib.request.Request(url, method="PUT"), timeout=60).read()
+            merged.append((titles[key], target))
+    return merged
+
+
 def mark_unwatched(cfg: Config, rating_key: str) -> None:
     query = urllib.parse.urlencode(
         {"identifier": "com.plexapp.plugins.library", "key": rating_key, "X-Plex-Token": cfg.plex.token}

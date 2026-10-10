@@ -82,3 +82,27 @@ def test_public_video_list_has_links_but_nothing_private(tmp_path, monkeypatch):
     assert "plex" not in html.casefold() and "Gitt opp" not in html and "dailymotion" not in html
     assert "watched" not in html.casefold() and "liked" not in html.casefold()
     assert "<\\/script>" in html and "ARK </script>" not in html  # titles can't break out of the data block
+
+
+def test_merge_stale_shows_only_folds_shows_that_wholly_belong_elsewhere(tmp_path, monkeypatch):
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data",
+                 creators=[CreatorConfig(creator="M")],
+                 plex=PlexConfig(url="http://x", token="t", section_id=18, library_path="/Media01/Mandy"))
+    leaf = lambda show, key, rel: {"grandparentTitle": show, "grandparentRatingKey": key,
+                                   "Media": [{"Part": [{"file": "/Media01/Mandy/" + rel}]}]}
+    responses = {
+        "/library/sections/18/all": {"Metadata": [{"title": "8 Out Of 10 Cats Does Countdown", "ratingKey": "1"},
+                                                  {"title": "8 Out of Cats Does Countdown", "ratingKey": "2"},
+                                                  {"title": "Mixed", "ratingKey": "3"}]},
+        "/library/sections/18/allLeaves": {"Metadata": [leaf("8 Out Of 10 Cats Does Countdown", "1", "a.mp4"),
+                                                        leaf("8 Out of Cats Does Countdown", "2", "b.mp4"),
+                                                        leaf("Mixed", "3", "c.mp4"), leaf("Mixed", "3", "d.mp4")]},
+    }
+    monkeypatch.setattr(plex, "_get", lambda cfg, path: responses[path])
+    calls = []
+    monkeypatch.setattr(plex.urllib.request, "urlopen", lambda req, timeout: calls.append(req.full_url) or type("R", (), {"read": lambda s: b""})())
+    lib = cfg.library_dir
+    wanted = {lib / "a.mp4": "8 Out Of 10 Cats Does Countdown", lib / "b.mp4": "8 Out Of 10 Cats Does Countdown",
+              lib / "c.mp4": "8 Out Of 10 Cats Does Countdown", lib / "d.mp4": "Mixed"}
+    assert plex.merge_stale_shows(cfg, wanted) == [("8 Out of Cats Does Countdown", "8 Out Of 10 Cats Does Countdown")]
+    assert len(calls) == 1 and "/library/metadata/1/merge?ids=2" in calls[0]
