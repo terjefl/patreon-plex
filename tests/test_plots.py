@@ -151,3 +151,43 @@ def test_refile_moves_a_post_to_its_proper_show(tmp_path):
     assert h.state.posts["75018496"]["files"] == [str(n) for _, n in moves]
     assert season.parent.joinpath("tvshow.nfo").exists()
     assert h.refile("75018496") == []  # already in place
+
+
+def test_overrides_aliases_and_specials_place_posts(tmp_path):
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
+
+    creator = CreatorConfig(
+        creator="M", creator_name="Mandy Cane Lane", folder="",
+        show_aliases={"WILTY? - Full Episode": "Would I Lie To You?"},
+        specials={"Only Fools And Horses": {"Christmas Crackers": 1, "The Frog's Legacy": 7}},
+        title_overrides={"1": "Only Fools And Horses - Christmas Crackers"},
+    )
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data", creators=[creator])
+    h = Harvester(cfg, creator, dry_run=True)
+    h.state.shows["only fools and horses"] = "Only Fools And Horses"
+    plan = lambda pid, title: h.plan({"id": pid, "title": title, "timestamp": 1700000000})
+    ep = plan("1", "Only Fools And Horses - S1 E7 - Christmas Crackers")
+    assert (ep.show_title, ep.season, ep.episode, ep.title) == ("Only Fools And Horses", 0, 1, "Christmas Crackers")
+    ep = plan("2", "Only Fools And Horses - The Frog's Legacy [1987 Christmas Special]")
+    assert (ep.season, ep.episode, ep.title) == (0, 7, "The Frog's Legacy")
+    ep = plan("3", "WILTY? - Full Episode - S9 E7")
+    assert (ep.show_title, ep.season, ep.episode) == ("Would I Lie To You?", 9, 7)
+    ep = plan("4", "Mr Bean - S1 - E13 - Goodnight Mr Bean")
+    assert (ep.show_title, ep.season, ep.episode, ep.title) == ("Mr Bean", 1, 13, "Goodnight Mr Bean")
+    ep = plan("5", "Mandy Cane Lane - Garth Marenghi's Darkplace - S01E01")
+    assert ep.show_title == "Garth Marenghi's Darkplace"
+
+
+def test_post_moving_to_specials_gets_a_number_of_its_own(tmp_path):
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
+
+    creator = CreatorConfig(creator="M", creator_name="Mandy Cane Lane", folder="")
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data", creators=[creator])
+    h = Harvester(cfg, creator, dry_run=True)
+    h.state.counters.update({"misc:2024": 5, "special:the office": 3})
+    h.state.posts["9"] = {"status": "done", "number": 3, "counter": "misc:2024"}  # was misc 2024 #3
+    h.state.shows["the office"] = "The Office"
+    ep = h.plan({"id": "9", "title": "The Office - Deleted Scenes", "timestamp": 1704844800})
+    assert (ep.season, ep.episode) == (0, 4)  # not S00E03, which is taken

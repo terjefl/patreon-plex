@@ -26,6 +26,9 @@ class CreatorConfig:
     show_aliases: dict[str, str] = field(default_factory=dict)
     # Official special numbers per show, e.g. {"Only Fools And Horses": {"Dates": 8}}
     specials: dict[str, dict[str, int]] = field(default_factory=dict)
+    # Title to file a post by instead of its own, per post id, when its title can't say where it
+    # belongs, e.g. {"83877577": "Travel Man - S2 E3 - Copenhagen (Noel Fielding)"}
+    title_overrides: dict[str, str] = field(default_factory=dict)
     # The creator's YouTube channel (e.g. https://www.youtube.com/@MandyCaneLane), for the statistics page
     youtube_url: str | None = None
 

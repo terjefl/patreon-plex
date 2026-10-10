@@ -8,7 +8,7 @@ _SE_RE = re.compile(
     r"""^(?P<show>.+?)              # show name (lazy)
         [\s\-–—:|]*                 # separator
         \bS(?:eason)?\s*(?P<season>\d{1,3})
-        \s*[.,x]?\s*
+        [\s.,x\-–]*                  # "S1 E2", "S1.E2", "S1 - E13"
         E(?:p(?:isode)?)?\s*(?P<episode>\d{1,4})\b\*?   # "E6*": a starred episode is still E6
         [\s\-–—:|.]*                # separator
         (?P<title>.*)$""",

@@ -145,21 +145,24 @@ class Harvester:
 
     def plan(self, info: dict) -> Episode:
         post_id = str(info["id"])
-        title = clean(info.get("title") or "")
+        title = clean(self.creator.title_overrides.get(post_id) or info.get("title") or "")
         published = datetime.fromtimestamp(info["timestamp"], tz=UTC)
         description = clean_plot(info.get("description") or "")
         post_state = self.state.posts.setdefault(post_id, {"status": "pending"})
 
         def numbered(counter: str, reserved: set[int] = frozenset()) -> int:
-            # Assigned once per post and remembered, so retries keep the same number.
-            if "number" not in post_state:
+            # Assigned once per post and remembered, so retries keep the same number; a post that
+            # moves (to a show's specials, say) gets a new number from its new counter.
+            if "number" not in post_state or post_state.get("counter", counter) != counter:
                 post_state["number"] = self.state.next_number(counter, reserved)
+            post_state["counter"] = counter
             return post_state["number"]
 
         parsed = parse_title(title)
         special_show = self._known_show_prefix(title)
         if parsed:
-            show = self._canonical_show(parsed.show)
+            # "Mandy Cane Lane - Garth Marenghi's Darkplace - S01E01": the creator's name isn't the show's
+            show = self._canonical_show(parsed.show.removeprefix(self.creator_name + " - ") or parsed.show)
             season, episode, ep_title = parsed.season, parsed.episode, parsed.episode_title
         elif special_show:
             # "Only Fools And Horses - Dates (1988)": a known show without SxE goes to Specials.
@@ -471,14 +474,21 @@ class Harvester:
             log.info("Pausing %.0f s before next download", seconds)
             time.sleep(seconds)
 
-    def refile(self, post_id: str) -> list[tuple[Path, Path]]:
-        """Move a downloaded post to where it belongs now, e.g. after a title parsing fix or a new
-        show alias: its videos, thumbnails and .nfo files, and its paths in state.json. A show
-        folder left without videos is removed. Returns (old, new) video paths."""
+    def refile(self, post_id: str, move: bool = True) -> list[tuple[Path, Path]]:
+        """Move a downloaded post to where it belongs now, e.g. after a title parsing fix, a new
+        show alias or a title override: its videos, thumbnails and .nfo files, and its paths in
+        state.json. A show folder left without videos is removed. Returns (old, new) video paths;
+        with move=False only says what would move."""
         post = self.state.posts.get(post_id) or {}
-        if post.get("status") != "done" or "published" not in post:
-            raise ValueError(f"Post {post_id} isn't a downloaded post with a known date")
         old_files = [Path(f) for f in post.get("files", [])]
+        if post.get("status") != "done" or not old_files:
+            raise ValueError(f"Post {post_id} isn't a downloaded post")
+        if "published" not in post:
+            # posts downloaded before dates were kept in state: the .nfo has it
+            aired = ET.parse(old_files[0].with_suffix(".nfo")).getroot().findtext("aired") or ""
+            post["published"] = int(datetime.fromisoformat(aired + "T12:00:00+00:00").timestamp())
+        if "number" in post and "counter" not in post:
+            post["counter"] = self._counter_of(old_files[0])
         ep = self.plan({"id": post_id, "title": post.get("title"), "timestamp": post["published"]})
         show_dir = self.library_dir / ep.show_folder
         season_dir = show_dir / ep.season_dir
@@ -487,8 +497,8 @@ class Harvester:
             new = season_dir / (ep.basename(part=i if len(old_files) > 1 else None) + old.suffix)
             if new != old:
                 moves.append((old, new))
-        if not moves:
-            return []
+        if not moves or not move:
+            return moves
         season_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, old_files[0].with_suffix(".jpg"))
         for old, new in moves:
@@ -512,6 +522,16 @@ class Harvester:
                                     if safe_filename(self.creator.show_name_template.format(creator=self.creator_name, show=v)) != old_show.name}
         self.state.save()
         return moves
+
+    def _counter_of(self, file: Path) -> str:
+        """The numbering a downloaded post's number came from, judging by where it lies."""
+        season, show_dir = file.parent.name, file.parent.parent.name
+        if re.fullmatch(r"Season \d{4}", season):
+            return f"misc:{season[-4:]}"
+        for show in self.state.shows.values():
+            if safe_filename(self.creator.show_name_template.format(creator=self.creator_name, show=show)) == show_dir:
+                return f"special:{show_key(show)}"
+        return f"special:{show_key(show_dir)}"
 
     def refresh_show_art(self) -> int:
         """Rewrite tvshow.nfo, poster and background for every show folder in the library."""
@@ -660,8 +680,8 @@ def _host(url: str) -> str:
 
 def _special_key(title: str) -> str:
     """'The Jolly Boys' Outing (Special)' and 'the jolly boys outing' compare equal."""
-    title = re.sub(r"\([^)]*\)", " ", title)
-    title = re.sub(r"\b(christmas\s+)?special\b", " ", title, flags=re.IGNORECASE)
+    title = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", title)
+    title = re.sub(r"\b(\d{4}\s+)?(christmas\s+)?special\b", " ", title, flags=re.IGNORECASE)
     return show_key(title)
 
 

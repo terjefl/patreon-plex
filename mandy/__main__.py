@@ -5,6 +5,7 @@ from pathlib import Path
 
 from yt_dlp.networking.exceptions import TransportError
 
+from . import plex
 from .config import Config, load_config
 from .harvest import Harvester, LoginExpired, heartbeat, refresh_plex
 from .likes import check_likes, mark_liked_watched
@@ -78,7 +79,9 @@ def main() -> None:
     p_likes.add_argument("--all", action="store_true", help="check every downloaded post now")
     p_likes.add_argument("--mark-watched", action="store_true", help="then mark liked episodes as watched in Plex")
     p_refile = sub.add_parser("refile", help="move downloaded posts to where their title puts them now")
-    p_refile.add_argument("post_ids", nargs="+")
+    p_refile.add_argument("post_ids", nargs="*")
+    p_refile.add_argument("--all", action="store_true", help="every downloaded post that isn't where it belongs")
+    p_refile.add_argument("--dry-run", action="store_true", help="only show what would move")
     p_yt = sub.add_parser("youtube-stats", help="look up the creators' YouTube videos for the statistics page")
     p_yt.add_argument("--all", action="store_true", help="look up every new video now, not 300 at a time")
     sub.add_parser("run", help="download new posts once")
@@ -121,13 +124,32 @@ def main() -> None:
             if args.mark_watched:
                 print(f"{creator.creator}: marked {mark_liked_watched(cfg, creator)} episode(s) as watched")
     elif args.command == "refile":
-        harvester = Harvester(cfg, cfg.creators[0])
-        moved = [m for post_id in args.post_ids for m in harvester.refile(post_id)]
-        for old, new in moved:
-            print(f"{old.relative_to(harvester.library_dir)}\n  -> {new.relative_to(harvester.library_dir)}")
-        if moved:
+        harvester = Harvester(cfg, cfg.creators[0], dry_run=args.dry_run)
+        ids = args.post_ids or [k for k, p in harvester.state.posts.items() if args.all and p.get("status") == "done"]
+        moved, targets = [], set()
+        for post_id in ids:
+            try:
+                planned = harvester.refile(post_id, move=not args.dry_run)
+            except (FileExistsError, ValueError) as e:
+                print(f"{post_id}: SKIPPED, {e}")
+                continue
+            for old, new in planned:
+                moved.append((old, new))
+                clash = " [TAKEN]" if new.exists() or new in targets else ""
+                targets.add(new)
+                print(f"{post_id}: {old.relative_to(harvester.library_dir)}\n  -> {new.relative_to(harvester.library_dir)}{clash}")
+        print(f"{len(moved)} file(s) {'would move' if args.dry_run else 'moved'}")
+        if moved and not args.dry_run and cfg.plex:
             refresh_plex(cfg)
-        print(f"{len(moved)} file(s) moved")
+            # Plex recognises a moved file and keeps its old title; have it re-read the new .nfo
+            wanted, deadline = {new for _, new in moved}, time.time() + 300
+            while wanted and time.time() < deadline:
+                time.sleep(15)
+                for ep in plex.episodes(cfg):
+                    if ep.path in wanted:
+                        plex.refresh_metadata(cfg, ep.rating_key)
+                        wanted.discard(ep.path)
+            print(f"Plex re-read {len(moved) - len(wanted)} episode(s)" + (f"; {len(wanted)} not found yet" if wanted else ""))
     elif args.command == "youtube-stats":
         for creator in cfg.creators:
             if creator.youtube_url:
