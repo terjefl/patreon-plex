@@ -96,8 +96,8 @@ def refresh_metadata(cfg: Config, rating_key: str) -> None:
 def merge_stale_shows(cfg: Config, show_titles: dict[Path, str]) -> list[tuple[str, str]]:
     """After files moved to another show's folder, Plex can keep an episode under its old show.
     Merge each such old show into the show the episode's .nfo names, but only when every
-    episode of the old show belongs there. show_titles: episode path -> wanted show title.
-    Returns (old show, new show) merged."""
+    episode of the old show belongs there; a show only renamed gets its tvshow.nfo re-read.
+    show_titles: episode path -> wanted show title. Returns (old show, new show) fixed."""
     plex_root = cfg.plex.library_path.rstrip("/")
     section = f"/library/sections/{cfg.plex.section_id}"
     shows = {s["title"]: s["ratingKey"] for s in _get(cfg, f"{section}/all").get("Metadata", [])}
@@ -114,11 +114,16 @@ def merge_stale_shows(cfg: Config, show_titles: dict[Path, str]) -> list[tuple[s
         if len(wanted) != 1:
             continue
         target = next(iter(wanted))
-        if target != titles[key] and target in shows:
+        if target == titles[key]:
+            continue
+        if target in shows:
             query = urllib.parse.urlencode({"ids": key, "X-Plex-Token": cfg.plex.token})
             url = f"{cfg.plex.url.rstrip('/')}/library/metadata/{shows[target]}/merge?{query}"
             urllib.request.urlopen(urllib.request.Request(url, method="PUT"), timeout=60).read()
-            merged.append((titles[key], target))
+        else:
+            # the same show under a new spelling: have Plex re-read its tvshow.nfo
+            refresh_metadata(cfg, key)
+        merged.append((titles[key], target))
     return merged
 
 

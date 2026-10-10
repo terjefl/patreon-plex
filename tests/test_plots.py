@@ -223,3 +223,32 @@ def test_refile_never_moves_a_show_episode_to_her_own_videos(tmp_path):
     h.state.posts["1"] = {"status": "done", "title": "Am I An Idiom?", "published": 1788000000, "files": [str(f)]}
     with pytest.raises(ValueError, match="names no show"):
         h.refile("1", move=False)
+
+
+def test_refile_renames_a_show_that_changes_only_in_case(tmp_path):
+    import os
+
+    from mandy.config import Config, CreatorConfig
+    from mandy.harvest import Harvester
+
+    creator = CreatorConfig(creator="M", creator_name="Mandy Cane Lane", folder="", show_aliases={"Sick Of It": "Sick of It"})
+    cfg = Config(library_dir=tmp_path / "lib", cookies_file=tmp_path / "c", data_dir=tmp_path / "data", creators=[creator])
+    season = tmp_path / "lib" / "Mandy Cane Lane - Sick Of It" / "Season 01"
+    season.mkdir(parents=True)
+    files = []
+    for e in (1, 2):
+        stem = season / f"Mandy Cane Lane - Sick Of It - S01E0{e}"
+        for suffix in (".mp4", ".jpg", ".nfo"):
+            stem.with_suffix(suffix).write_text(suffix)
+        files.append(str(stem.with_suffix(".mp4")))
+    h = Harvester(cfg, creator)
+    h.state.shows["sick of it"] = "Sick Of It"
+    for e, f in enumerate(files, start=1):
+        h.state.posts[str(e)] = {"status": "done", "title": f"Sick Of It - S1 E{e}", "published": 1750000000, "files": [f]}
+    for pid in ("1", "2"):
+        h.refile(pid)
+    assert os.listdir(tmp_path / "lib") == ["Mandy Cane Lane - Sick of It"]
+    names = sorted(os.listdir(tmp_path / "lib" / "Mandy Cane Lane - Sick of It" / "Season 01"))
+    assert names[0] == "Mandy Cane Lane - Sick of It - S01E01.jpg" and len(names) == 6  # 2 episodes x (.mp4 .jpg .nfo)
+    assert "<showtitle>Sick of It</showtitle>" in Path(h.state.posts["2"]["files"][0]).with_suffix(".nfo").read_text()
+    assert all(Path(f).exists() and "Sick of It/" in f for p in h.state.posts.values() for f in p["files"])

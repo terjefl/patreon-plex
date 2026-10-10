@@ -159,7 +159,7 @@ def main() -> None:
                 if nfo.exists():
                     nfo_shows[ep.path] = ET.parse(nfo).getroot().findtext("showtitle") or ep.show
             for old_show, new_show in plex.merge_stale_shows(cfg, nfo_shows):
-                print(f"Plex: merged the show {old_show!r} into {new_show!r}")
+                print(f"Plex: the show {old_show!r} is now {new_show!r}")
     elif args.command == "youtube-stats":
         for creator in cfg.creators:
             if creator.youtube_url:

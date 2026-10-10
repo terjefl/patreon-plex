@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import random
 import logging
 import re
@@ -501,6 +502,9 @@ class Harvester:
             raise ValueError(f"its saved title {post.get('title')!r} names no show; leaving it in {old_files[0].parent.parent.name}")
         show_dir = self.library_dir / ep.show_folder
         season_dir = show_dir / ep.season_dir
+        if move:
+            self._match_folder_case(show_dir)
+            old_files = [Path(f) for f in post["files"]]
         moves = []
         for i, old in enumerate(old_files, start=1):
             new = season_dir / (ep.basename(part=i if len(old_files) > 1 else None) + old.suffix)
@@ -511,15 +515,19 @@ class Harvester:
         season_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_show_assets(show_dir, ep.show_title, ep.source_show, old_files[0].with_suffix(".jpg"))
         for old, new in moves:
-            if new.exists():
+            # On the NAS a name that differs only in case is the same file
+            same = new.exists() and os.path.samefile(new, old)
+            if new.exists() and not same:
                 raise FileExistsError(new)
             # thumbnail first, the video last: Plex should find the new sidecars with it
-            for suffix in (".jpg",):
-                if old.with_suffix(suffix).exists():
-                    old.with_suffix(suffix).rename(new.with_suffix(suffix))
+            if old.with_suffix(".jpg").exists():
+                _rename(old.with_suffix(".jpg"), new.with_suffix(".jpg"))
+            if not same:
+                old.with_suffix(".nfo").unlink(missing_ok=True)
+            elif old.with_suffix(".nfo").exists():
+                _rename(old.with_suffix(".nfo"), new.with_suffix(".nfo"))
             write_episode_nfo(new.with_suffix(".nfo"), ep)
-            old.rename(new)
-            old.with_suffix(".nfo").unlink(missing_ok=True)
+            _rename(old, new)
             log.info("Moved %s -> %s", old.name, new.relative_to(self.library_dir))
         post["files"] = [str(dict(moves).get(f, f)) for f in old_files]
         for old_show in {old.parent.parent for old, _ in moves}:
@@ -531,6 +539,22 @@ class Harvester:
                                     if safe_filename(self.creator.show_name_template.format(creator=self.creator_name, show=v)) != old_show.name}
         self.state.save()
         return moves
+
+    def _match_folder_case(self, show_dir: Path) -> None:
+        """A show renamed only in case ("Sick Of It" -> "Sick of It"): rename its folder, which
+        the NAS sees as the same name, and the paths of every post in it."""
+        if not show_dir.parent.exists() or show_dir.name in os.listdir(show_dir.parent):
+            return
+        twin = next((p for p in show_dir.parent.iterdir() if p.name.casefold() == show_dir.name.casefold()), None)
+        if twin is None:
+            return
+        _rename(twin, show_dir)
+        old, new = f"{twin}/", f"{show_dir}/"
+        for post in self.state.posts.values():
+            if post.get("files"):
+                post["files"] = [new + f[len(old):] if f.startswith(old) else f for f in post["files"]]
+        self.state.save()
+        log.info("Renamed the folder %s -> %s", twin.name, show_dir.name)
 
     def _counter_of(self, file: Path) -> str:
         """The numbering a downloaded post's number came from, judging by where it lies."""
@@ -667,6 +691,16 @@ class Harvester:
         self.state.save()
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
         return result
+
+
+def _rename(old: Path, new: Path) -> None:
+    """Rename, also when the names differ only in case on a case-insensitive file system."""
+    if old.name.casefold() == new.name.casefold() and old.parent == new.parent:
+        step = old.with_name(old.name + ".renaming")
+        old.rename(step)
+        step.rename(new)
+    else:
+        old.rename(new)
 
 
 def _backoff(n: int) -> float:
