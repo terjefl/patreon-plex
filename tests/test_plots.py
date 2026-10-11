@@ -134,8 +134,9 @@ def test_refile_moves_a_post_to_its_proper_show(tmp_path):
     old = []
     for part in (1, 2):
         stem = old_show / "Season 01" / f"Mandy Cane Lane - (Edit) Peep Show - S01E06 - - Funeral - Reaction! - pt{part}"
-        for suffix in (".mp4", ".jpg", ".nfo"):
+        for suffix in (".mp4", ".jpg"):
             stem.with_suffix(suffix).write_text(suffix)
+        stem.with_suffix(".nfo").write_text(f"<episodedetails><plot>Her words {part}</plot></episodedetails>")
         old.append(str(stem.with_suffix(".mp4")))
     h = Harvester(cfg, cfg.creators[0])
     h.state.posts["75018496"] = {"status": "done", "title": "(Edit) Peep Show - S1 E6* - Funeral - Reaction!",
@@ -241,8 +242,9 @@ def test_refile_renames_a_show_that_changes_only_in_case(tmp_path, monkeypatch):
     files = []
     for e in (1, 2):
         stem = season / f"Mandy Cane Lane - Sick Of It - S01E0{e}"
-        for suffix in (".mp4", ".jpg", ".nfo"):
+        for suffix in (".mp4", ".jpg"):
             stem.with_suffix(suffix).write_text(suffix)
+        stem.with_suffix(".nfo").write_text(f"<episodedetails><plot>Her words {e}</plot></episodedetails>")
         files.append(str(stem.with_suffix(".mp4")))
     h = Harvester(cfg, creator)
     h.state.shows["sick of it"] = "Sick Of It"
@@ -253,5 +255,6 @@ def test_refile_renames_a_show_that_changes_only_in_case(tmp_path, monkeypatch):
     assert os.listdir(tmp_path / "lib") == ["Mandy Cane Lane - Sick of It"]
     names = sorted(os.listdir(tmp_path / "lib" / "Mandy Cane Lane - Sick of It" / "Season 01"))
     assert names[0] == "Mandy Cane Lane - Sick of It - S01E01.jpg" and len(names) == 6  # 2 episodes x (.mp4 .jpg .nfo)
-    assert "<showtitle>Sick of It</showtitle>" in Path(h.state.posts["2"]["files"][0]).with_suffix(".nfo").read_text()
+    nfo = Path(h.state.posts["2"]["files"][0]).with_suffix(".nfo").read_text()
+    assert "<showtitle>Sick of It</showtitle>" in nfo and "Her words 2" in nfo  # the description survives
     assert all(Path(f).exists() and "Sick of It/" in f for p in h.state.posts.values() for f in p["files"])

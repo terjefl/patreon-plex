@@ -9,7 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -518,6 +518,13 @@ class Harvester:
             same = new.exists() and same_file(old, new)
             if new.exists() and not same:
                 raise FileExistsError(new)
+            # The post's text isn't to hand here; keep the description the old .nfo has
+            old_nfo = old.with_suffix(".nfo")
+            try:
+                plot = ET.parse(old_nfo).getroot().findtext("plot")
+            except (OSError, ET.ParseError):
+                plot = None
+            nfo_ep = replace(ep, description=ep.description or plot or "")
             # thumbnail first, the video last: Plex should find the new sidecars with it
             if old.with_suffix(".jpg").exists():
                 _rename(old.with_suffix(".jpg"), new.with_suffix(".jpg"))
@@ -525,7 +532,7 @@ class Harvester:
                 old.with_suffix(".nfo").unlink(missing_ok=True)
             elif old.with_suffix(".nfo").exists():
                 _rename(old.with_suffix(".nfo"), new.with_suffix(".nfo"))
-            write_episode_nfo(new.with_suffix(".nfo"), ep)
+            write_episode_nfo(new.with_suffix(".nfo"), nfo_ep)
             _rename(old, new)
             log.info("Moved %s -> %s", old.name, new.relative_to(self.library_dir))
         post["files"] = [str(dict(moves).get(f, f)) for f in old_files]
